@@ -1,12 +1,14 @@
 from io import BytesIO
 from pathlib import Path
+import subprocess
 from uuid import uuid4
 
 import pytest
 
 from app.core.config import Settings
-from app.core.exceptions import InvalidUploadError
+from app.core.exceptions import GenerationTimeoutError, InvalidUploadError
 from app.infrastructure.storage import LocalStorage
+from app.infrastructure.subprocess_runner import SubprocessRunner
 from app.services.upload_validation import UploadValidator
 
 
@@ -59,3 +61,13 @@ def test_upload_validator_rejects_type_and_size() -> None:
         validator.validate_metadata("text/plain")
     with pytest.raises(InvalidUploadError, match="limite"):
         validator.validate_size(BytesIO(b"12345"))
+
+
+def test_subprocess_runner_maps_timeout(monkeypatch) -> None:
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], timeout=kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", timeout)
+
+    with pytest.raises(GenerationTimeoutError, match="tempo limite"):
+        SubprocessRunner().run(["generator"], timeout=1)
