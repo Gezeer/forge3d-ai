@@ -1,0 +1,8 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createGenerationJob, getDownloadUrl, getJob } from "./api";
+beforeEach(() => vi.restoreAllMocks());
+describe("Forge3D API client", () => {
+  it("creates a multipart queue job", async () => { const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ job_id: "abc", engine: "triposr", status: "queued", status_url: "/jobs/abc" }), { status: 202, headers: { "Content-Type": "application/json", "X-Request-ID": "req" } })); const file = new File(["image"], "chair.png", { type: "image/png" }); const result = await createGenerationJob(file, "auto"); expect(result.job_id).toBe("abc"); const [, init] = fetchMock.mock.calls[0]; expect(init?.method).toBe("POST"); expect(init?.body).toBeInstanceOf(FormData); expect((init?.body as FormData).get("engine")).toBe("auto"); });
+  it("normalizes public API errors", async () => { vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ error: { code: "queue_full", message: "Fila cheia", request_id: "req-1" } }), { status: 503, headers: { "Content-Type": "application/json" } })); await expect(getJob("abc")).rejects.toMatchObject({ code: "queue_full", requestId: "req-1", message: "Fila cheia" }); });
+  it("encodes download job IDs", () => expect(getDownloadUrl("a/b")).toContain("/download/a%2Fb"));
+});

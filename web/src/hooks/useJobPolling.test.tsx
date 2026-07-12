@@ -1,0 +1,8 @@
+import { act, renderHook } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { useJobPolling } from "./useJobPolling";
+import * as api from "@/services/api";
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+it("polls until completed and stops", async () => { vi.useFakeTimers(); const get = vi.spyOn(api, "getJob").mockResolvedValue({ job_id: "1", engine: "triposr", status: "completed", download_url: "/download/1" }); const { result } = renderHook(() => useJobPolling(100)); act(() => result.current.start("1", { job_id: "1", engine: "triposr", status: "queued" })); await act(async () => vi.advanceTimersByTimeAsync(100)); expect(result.current.job?.status).toBe("completed"); await act(async () => vi.advanceTimersByTimeAsync(500)); expect(get).toHaveBeenCalledTimes(1); });
+it("stops polling after failed", async () => { vi.useFakeTimers(); const get = vi.spyOn(api, "getJob").mockResolvedValue({ job_id: "2", engine: "hunyuan", status: "failed", error: "safe" }); const { result } = renderHook(() => useJobPolling(100)); act(() => result.current.start("2", { job_id: "2", engine: "hunyuan", status: "queued" })); await act(async () => vi.advanceTimersByTimeAsync(100)); expect(result.current.job?.status).toBe("failed"); await act(async () => vi.advanceTimersByTimeAsync(500)); expect(get).toHaveBeenCalledTimes(1); });
+it("cleans the polling timer on unmount", () => { vi.useFakeTimers(); const get = vi.spyOn(api, "getJob"); const { result, unmount } = renderHook(() => useJobPolling(100)); act(() => result.current.start("3", { job_id: "3", engine: "triposr", status: "queued" })); unmount(); act(() => vi.advanceTimersByTime(200)); expect(get).not.toHaveBeenCalled(); });
