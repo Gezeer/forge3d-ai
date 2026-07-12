@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.core.exceptions import TexturePipelineError
 from app.domain.jobs import Job, JobRepository, TextureStatus
 from app.engines.contracts import JobContext
 from app.texture.contracts import TextureRequest, TextureService
@@ -46,13 +47,27 @@ class TextureExecutor:
                 job.transition_texture(
                     TextureStatus.COMPLETED,
                     artifact_relative_path=result.artifact_relative_path,
+                    output_textured_glb=str(result.artifact_path),
                     metadata=result.metadata,
                 )
             )
             return result
         except Exception as error:
+            error_payload = (
+                error.to_dict()
+                if isinstance(error, TexturePipelineError)
+                else {
+                    "status": "error",
+                    "step": "texture",
+                    "message": "Falha na texturização",
+                }
+            )
             self.jobs.save(
-                job.transition_texture(TextureStatus.FAILED, error=type(error).__name__)
+                job.transition_texture(
+                    TextureStatus.FAILED,
+                    error=error_payload["message"],
+                    metadata=error_payload,
+                )
             )
             logger.error(
                 "texture_state_changed job_id=%s engine=%s status=texture_failed error_code=%s",
@@ -64,6 +79,7 @@ class TextureExecutor:
                     "engine": self.service.name,
                     "status": "texture_failed",
                     "error_code": type(error).__name__,
+                    "step": error_payload["step"],
                 },
             )
             raise

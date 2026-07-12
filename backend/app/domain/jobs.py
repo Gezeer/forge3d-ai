@@ -37,6 +37,7 @@ class Job:
     metadata: Optional[Dict[str, Any]] = None
     texture_status: Optional[TextureStatus] = None
     texture_artifact_relative_path: Optional[str] = None
+    output_textured_glb: Optional[str] = None
     texture_error: Optional[str] = None
     texture_metadata: Optional[Dict[str, Any]] = None
 
@@ -78,6 +79,7 @@ class Job:
             metadata=metadata,
             texture_status=self.texture_status,
             texture_artifact_relative_path=self.texture_artifact_relative_path,
+            output_textured_glb=self.output_textured_glb,
             texture_error=self.texture_error,
             texture_metadata=self.texture_metadata,
         )
@@ -87,6 +89,7 @@ class Job:
         status: TextureStatus,
         *,
         artifact_relative_path: Optional[str] = None,
+        output_textured_glb: Optional[str] = None,
         error: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> "Job":
@@ -112,6 +115,7 @@ class Job:
             metadata=self.metadata,
             texture_status=status,
             texture_artifact_relative_path=artifact_relative_path,
+            output_textured_glb=output_textured_glb or self.output_textured_glb,
             texture_error=error,
             texture_metadata=metadata,
         )
@@ -139,6 +143,7 @@ class Job:
             texture_artifact_relative_path=payload.get(
                 "texture_artifact_relative_path"
             ),
+            output_textured_glb=payload.get("output_textured_glb"),
             texture_error=payload.get("texture_error"),
             texture_metadata=payload.get("texture_metadata"),
         )

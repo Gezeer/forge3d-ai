@@ -44,6 +44,7 @@ class JobResponse(BaseModel):
     texture_download_url: Optional[str] = None
     texture_error: Optional[str] = None
     texture_metadata: Optional[Dict[str, Any]] = None
+    output_textured_glb: Optional[str] = None
 
     @classmethod
     def from_job(cls, job: Job) -> "JobResponse":
@@ -64,6 +65,7 @@ class JobResponse(BaseModel):
             ),
             texture_error=job.texture_error,
             texture_metadata=job.texture_metadata,
+            output_textured_glb=job.output_textured_glb,
         )
 
 

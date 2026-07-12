@@ -1,44 +1,55 @@
+from __future__ import annotations
+
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 from app.core.config import Settings
-from app.core.exceptions import (
-    GenerationTimeoutError,
-    ServiceUnavailableError,
-)
+from app.core.exceptions import TexturePipelineError
 from app.engines.contracts import JobContext
 from app.infrastructure.subprocess_runner import ProcessResult
 from app.texture.contracts import TextureRequest
 from app.texture.hunyuan import HunyuanTextureService
 
 
-class TextureRunner:
-    def __init__(self, returncode=0, error=None):
-        self.returncode = returncode
-        self.error = error
+class PipelineRunner:
+    def __init__(self, fail_at: int | None = None):
+        self.fail_at = fail_at
+        self.commands = []
 
     def run(self, command, timeout):
-        if self.error:
-            raise self.error
-        if self.returncode == 0:
-            Path(command[-1]).write_bytes(b"textured-glb")
-        return ProcessResult(self.returncode, stderr="private")
+        self.commands.append((list(command), timeout))
+        if self.fail_at == len(self.commands):
+            return ProcessResult(1, stderr="private details")
+        output = Path(command[command.index("--output") + 1])
+        output.write_bytes(b"artifact")
+        return ProcessResult(0)
 
 
 def settings(tmp_path: Path) -> Settings:
     root = tmp_path / "Hunyuan"
     root.mkdir()
+    forge3d = tmp_path / "forge3d"
+    scripts = forge3d / "backend" / "scripts"
+    scripts.mkdir(parents=True)
+    for name in (
+        "run_hunyuan_paint.py",
+        "blender_glb_to_obj.py",
+        "blender_obj_to_glb.py",
+    ):
+        (scripts / name).write_text("# fixture", encoding="utf-8")
+    python = tmp_path / "python"
+    python.write_text("", encoding="utf-8")
     return Settings(
         texture_root=root,
-        texture_command_json='["paint","{mesh}","{image}","{resolution}","{quality}","{output}"]',
+        forge3d_root=forge3d,
+        texture_python=python,
+        blender_executable="blender",
         texture_timeout_seconds=4,
     )
 
 
-def test_texture_service_creates_textured_glb_and_metadata(tmp_path: Path):
-    config = settings(tmp_path)
-    service = HunyuanTextureService(config, TextureRunner())
+def inputs(tmp_path: Path):
     job_id = uuid4()
     job_dir = tmp_path / str(job_id)
     job_dir.mkdir()
@@ -46,54 +57,58 @@ def test_texture_service_creates_textured_glb_and_metadata(tmp_path: Path):
     mesh.write_bytes(b"white")
     image = job_dir / "image.png"
     image.write_bytes(b"png")
-    result = service.texture(
-        JobContext(job_id, job_dir), mesh, image, TextureRequest(2048, "high")
+    return JobContext(job_id, job_dir), mesh, image
+
+
+def test_texture_service_runs_blender_paint_blender(tmp_path: Path):
+    runner = PipelineRunner()
+    service = HunyuanTextureService(settings(tmp_path), runner)
+    context, mesh, image = inputs(tmp_path)
+
+    result = service.generate_texture(
+        context, mesh, image, TextureRequest(2048, "high")
     )
-    assert result.artifact_path == job_dir / "model_textured.glb"
-    assert result.artifact_path.read_bytes() == b"textured-glb"
+
+    assert [Path(call[0][3]).name for call in runner.commands[::2]] == [
+        "blender_glb_to_obj.py",
+        "blender_obj_to_glb.py",
+    ]
+    assert Path(runner.commands[1][0][1]).name == "run_hunyuan_paint.py"
+    assert result.artifact_path == context.job_dir / "model_textured.glb"
+    assert result.artifact_path.read_bytes() == b"artifact"
     assert mesh.read_bytes() == b"white"
+    assert (context.job_dir / "texture_metadata.json").is_file()
     assert result.metadata["resolution"] == 2048
-    assert result.metadata["size_bytes"] > 0
 
 
-def test_texture_service_reports_unavailable_dependency(tmp_path: Path):
-    config = Settings(texture_root=tmp_path, texture_command_json="")
-    with pytest.raises(ServiceUnavailableError):
-        HunyuanTextureService(config, TextureRunner()).texture(
-            JobContext(uuid4(), tmp_path),
-            tmp_path / "model.glb",
-            tmp_path / "image.png",
-            TextureRequest(1024, "fast"),
-        )
+@pytest.mark.parametrize(
+    ("failure", "step"),
+    [(1, "glb_to_obj"), (2, "paint"), (3, "obj_to_glb")],
+)
+def test_texture_service_reports_exact_failed_step(
+    tmp_path: Path, failure: int, step: str
+):
+    context, mesh, image = inputs(tmp_path)
+    service = HunyuanTextureService(settings(tmp_path), PipelineRunner(failure))
 
+    with pytest.raises(TexturePipelineError) as raised:
+        service.generate_texture(context, mesh, image, TextureRequest(1024, "standard"))
 
-def test_texture_service_preserves_original_on_failure(tmp_path: Path):
-    config = settings(tmp_path)
-    job_dir = tmp_path / "job"
-    job_dir.mkdir()
-    mesh = job_dir / "model.glb"
-    mesh.write_bytes(b"white")
-    image = job_dir / "image.png"
-    image.write_bytes(b"png")
-    with pytest.raises(ServiceUnavailableError):
-        HunyuanTextureService(config, TextureRunner(1)).texture(
-            JobContext(uuid4(), job_dir), mesh, image, TextureRequest(1024, "standard")
-        )
+    assert raised.value.to_dict() == {
+        "status": "error",
+        "step": step,
+        "message": f"Falha na etapa {step}",
+    }
     assert mesh.read_bytes() == b"white"
-    assert not (job_dir / "model_textured.glb").exists()
+    assert not (context.job_dir / "model_textured.glb").exists()
 
 
-def test_texture_timeout_is_propagated(tmp_path: Path):
-    config = settings(tmp_path)
-    job_dir = tmp_path / "job"
-    job_dir.mkdir()
-    mesh = job_dir / "model.glb"
-    mesh.write_bytes(b"white")
-    image = job_dir / "image.png"
-    image.write_bytes(b"png")
-    with pytest.raises(GenerationTimeoutError):
-        HunyuanTextureService(
-            config, TextureRunner(error=GenerationTimeoutError("timeout"))
-        ).texture(
-            JobContext(uuid4(), job_dir), mesh, image, TextureRequest(1024, "standard")
-        )
+def test_texture_service_builds_commands_without_python_expr(tmp_path: Path):
+    runner = PipelineRunner()
+    service = HunyuanTextureService(settings(tmp_path), runner)
+    context, mesh, image = inputs(tmp_path)
+    service.texture(context, mesh, image, TextureRequest(768, "fast"))
+
+    assert all("--python-expr" not in command for command, _ in runner.commands)
+    assert runner.commands[0][0][:3] == ["blender", "-b", "--python"]
+    assert runner.commands[2][0][:3] == ["blender", "-b", "--python"]

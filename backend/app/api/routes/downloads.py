@@ -15,12 +15,11 @@ def download_textured(
     job_id: UUID, container: Container = Depends(get_container)
 ) -> FileResponse:
     job = container.jobs.get(job_id)
-    if job is None or not job.texture_artifact_relative_path:
+    relative_path = job.texture_artifact_relative_path if job is not None else None
+    if job is None or not relative_path:
         raise HTTPException(status_code=404, detail="Modelo texturizado não encontrado")
     try:
-        artifact = container.storage.artifact_for_job(
-            job_id, job.texture_artifact_relative_path
-        )
+        artifact = container.storage.artifact_for_job(job_id, relative_path)
     except ArtifactNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return FileResponse(

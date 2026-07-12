@@ -140,6 +140,9 @@ O checkout local não contém `hy3dpaint/textureGenPipeline.py`, `gradio_app.py`
 pesos ou requisitos Hunyuan. No RunPod, diagnostique o ambiente real antes de
 definir o comando:
 
+O pipeline automático de produção e a API `/api/v1/texture` estão documentados
+em [`backend/docs/TEXTURE_PIPELINE.md`](docs/TEXTURE_PIPELINE.md).
+
 ```bash
 cd /workspace/forge3d-ai
 backend/scripts/check_texture_dependencies.sh
@@ -186,17 +189,19 @@ cd "$HUNYUAN_ROOT"
 git apply /workspace/forge3d-ai/backend/patches/hunyuan_meshrender_mesh_inpaint.patch
 ```
 
-Após identificar o comando oficial de `gradio_app.py`/`textureGenPipeline.py`,
-configure-o como uma lista JSON, usando os placeholders abaixo:
+Configure o pipeline automático validado:
 
 ```bash
-export FORGE3D_TEXTURE_COMMAND_JSON='["python3","/caminho/wrapper_oficial.py","--mesh","{mesh}","--image","{image}","--output","{output}","--resolution","{resolution}","--quality","{quality}"]'
+export FORGE3D_ROOT=/workspace/forge3d-ai
+export FORGE3D_TEXTURE_ROOT=/workspace/kai3d/models/Hunyuan3D-2.1
+export FORGE3D_TEXTURE_PYTHON=/workspace/kai3d/models/Hunyuan3D-2.1/venv/bin/python
+export FORGE3D_BLENDER_EXECUTABLE=blender
 export FORGE3D_TEXTURE_TIMEOUT_SECONDS=1800
 ```
 
-O exemplo descreve o contrato e não afirma qual CLI o checkout Hunyuan publica.
-O wrapper oficial deve produzir exatamente o caminho `{output}`. Para validar
-GPU com um job de shape já concluído:
+O serviço chama os dois scripts Blender em background e usa exclusivamente
+`backend/scripts/run_hunyuan_paint.py` para o Paint. Para validar GPU com um job
+de shape já concluído:
 
 ```bash
 export FORGE3D_TEXTURE_TEST_JOB_ID=<uuid-completed>

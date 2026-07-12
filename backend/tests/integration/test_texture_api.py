@@ -87,8 +87,34 @@ def test_texture_is_queued_completed_and_downloadable(tmp_path: Path):
                 break
         assert status["status"] == "completed"
         assert status["texture_status"] == "textured"
+        assert status["output_textured_glb"].endswith(
+            f"outputs/{job.id}/model_textured.glb"
+        )
         assert client.get(f"/download/{job.id}").content == b"white"
         assert client.get(f"/download/{job.id}/textured").content == b"pbr"
+
+
+def test_api_v1_texture_preserves_professional_and_legacy_routes(tmp_path: Path):
+    client, container = _client(tmp_path)
+    container.job_queue.texture_executor = TextureExecutor(
+        container.jobs, FakeTextureService()
+    )
+    job = completed_job(tmp_path, container)
+    with client:
+        response = client.post(
+            "/api/v1/texture",
+            data={"job_id": str(job.id), "quality": "standard"},
+        )
+        assert response.status_code == 202
+        assert response.json()["status_url"] == f"/jobs/{job.id}"
+        assert "/api/v1/texture" in client.get("/openapi.json").json()["paths"]
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            status = client.get(f"/jobs/{job.id}").json()
+            if status["texture_status"] == "textured":
+                break
+        assert client.get(f"/download/{job.id}/textured").content == b"pbr"
+        assert client.get(f"/jobs/{job.id}/texture").status_code == 200
 
 
 def test_texture_failure_keeps_original(tmp_path: Path):

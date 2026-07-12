@@ -6,7 +6,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.api.dependencies import Container, get_container
-from app.api.schemas import TextureJobResponse
+from app.api.schemas import ErrorResponse, TextureJobResponse
+from app.core.exceptions import JobQueueFullError
 from app.domain.jobs import JobStatus, TextureStatus
 from app.engines.contracts import JobContext
 from app.texture.contracts import TextureRequest
@@ -23,19 +24,13 @@ def _reference_image(job_dir: Path) -> Path:
     raise HTTPException(status_code=404, detail="Imagem de referência não encontrada")
 
 
-@router.post(
-    "/jobs/{job_id}/texture",
-    response_model=TextureJobResponse,
-    status_code=202,
-    summary="Enfileirar texturização PBR",
-)
-def create_texture_job(
+def _enqueue_texture(
     job_id: UUID,
-    file: UploadFile = File(None),
-    engine: str = Form("hunyuan"),
-    resolution: int = Form(2048),
-    quality: str = Form("standard"),
-    container: Container = Depends(get_container),
+    file: UploadFile | None,
+    engine: str,
+    resolution: int,
+    quality: str,
+    container: Container,
 ) -> TextureJobResponse:
     job = container.jobs.get(job_id)
     if job is None:
@@ -61,15 +56,22 @@ def create_texture_job(
         if file is not None:
             file.file.close()
     queued = job.transition_texture(TextureStatus.QUEUED)
-    container.job_queue.enqueue_texture(
-        TextureQueuedJob(
-            queued,
-            JobContext(job_id, job_dir),
-            mesh,
-            reference,
-            TextureRequest(resolution, quality),
+    try:
+        container.job_queue.enqueue_texture(
+            TextureQueuedJob(
+                queued,
+                JobContext(job_id, job_dir),
+                mesh,
+                reference,
+                TextureRequest(resolution, quality),
+            )
         )
-    )
+    except JobQueueFullError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Fila de textura indisponível",
+            headers={"X-Error-Code": "queue_full"},
+        ) from exc
     return TextureJobResponse(
         job_id=job_id,
         engine=engine,
@@ -77,6 +79,50 @@ def create_texture_job(
         status_url=f"/jobs/{job_id}",
         original_download_url=f"/download/{job_id}",
     )
+
+
+@router.post(
+    "/api/v1/texture",
+    response_model=TextureJobResponse,
+    status_code=202,
+    summary="Executar pipeline completo de textura Hunyuan",
+    description=(
+        "Enfileira automaticamente GLB para OBJ, Hunyuan Paint e OBJ para GLB. "
+        "Consulte status_url até textured ou texture_failed."
+    ),
+    responses={
+        404: {"model": ErrorResponse, "description": "Job não encontrado"},
+        409: {"model": ErrorResponse, "description": "Shape não concluído"},
+        422: {"model": ErrorResponse, "description": "Parâmetros inválidos"},
+        503: {"model": ErrorResponse, "description": "Fila indisponível"},
+    },
+)
+def create_texture_pipeline(
+    job_id: UUID = Form(...),
+    file: UploadFile = File(None),
+    engine: str = Form("hunyuan"),
+    resolution: int = Form(2048),
+    quality: str = Form("standard"),
+    container: Container = Depends(get_container),
+) -> TextureJobResponse:
+    return _enqueue_texture(job_id, file, engine, resolution, quality, container)
+
+
+@router.post(
+    "/jobs/{job_id}/texture",
+    response_model=TextureJobResponse,
+    status_code=202,
+    summary="Enfileirar texturização PBR",
+)
+def create_texture_job(
+    job_id: UUID,
+    file: UploadFile = File(None),
+    engine: str = Form("hunyuan"),
+    resolution: int = Form(2048),
+    quality: str = Form("standard"),
+    container: Container = Depends(get_container),
+) -> TextureJobResponse:
+    return _enqueue_texture(job_id, file, engine, resolution, quality, container)
 
 
 @router.get("/jobs/{job_id}/texture", response_model=TextureJobResponse)

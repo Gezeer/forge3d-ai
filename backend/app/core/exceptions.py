@@ -24,6 +24,15 @@ class ArtifactNotFoundError(GenerationError):
     pass
 
 
+class TexturePipelineError(GenerationError):
+    def __init__(self, step: str, message: str, *, details: str = "") -> None:
+        super().__init__(message, details=details)
+        self.step = step
+
+    def to_dict(self) -> dict[str, str]:
+        return {"status": "error", "step": self.step, "message": str(self)}
+
+
 class EngineRegistryError(Forge3DError):
     pass
 
