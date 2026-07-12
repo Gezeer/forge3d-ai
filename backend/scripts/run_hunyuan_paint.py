@@ -155,13 +155,13 @@ def run_pipeline(
         exist_ok=True,
     )
 
-result = pipeline(
-    mesh_path=str(mesh),
-    image_path=str(image),
-    output_mesh_path=str(output),
-    use_remesh=False,
-    save_glb=False,
-)
+    result = pipeline(
+        mesh_path=str(mesh),
+        image_path=str(image),
+        output_mesh_path=str(output),
+        use_remesh=False,
+        save_glb=False,
+    )
 
     return result
 
