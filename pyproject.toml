@@ -33,6 +33,7 @@ addopts = "-q -p no:cacheprovider"
 testpaths = ["backend/tests"]
 markers = [
   "gpu: requires live RunPod GPU services and is skipped unless explicitly enabled",
+  "texture_gpu: requires the live Hunyuan Paint pipeline on RunPod",
 ]
 
 [tool.ruff]
@@ -42,6 +43,7 @@ extend-exclude = ["backend/main.py.save", "backend/main.py.save.1"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+ignore = ["E501", "E701", "E702"]
 
 [tool.ruff.format]
 quote-style = "double"

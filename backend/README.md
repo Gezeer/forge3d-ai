@@ -129,6 +129,47 @@ e download. Também confirmam a rota legada TripoSR, GLB e `0/mesh.glb`.
 - **URL Gradio assinada:** ela é baixada para `outputs/{job_id}/`; nunca é
   devolvida ao cliente nem gravada nos metadados públicos.
 
+## Hunyuan Texture/PBR
+
+A textura é um estágio separado e nunca invalida `model.glb`. O endpoint
+`POST /jobs/{job_id}/texture` enfileira o paint; o resultado esperado é
+`outputs/{job_id}/model_textured.glb`. Consulte o estágio em
+`GET /jobs/{job_id}/texture` e baixe por `GET /download/{job_id}/textured`.
+
+O checkout local não contém `hy3dpaint/textureGenPipeline.py`, `gradio_app.py`,
+pesos ou requisitos Hunyuan. No RunPod, diagnostique o ambiente real antes de
+definir o comando:
+
+```bash
+cd /workspace/forge3d-ai
+backend/scripts/check_texture_dependencies.sh
+PYTHONPATH=backend python3 backend/scripts/inspect_hunyuan_texture.py
+```
+
+O diagnóstico verifica `bpy`, `pymeshlab`, `libOpenGL.so.0`, CUDA/VRAM, imports
+do pipeline, pesos e caches. Ele não instala nada. Dependências já confirmadas
+como problemáticas no RunPod são Blender Python (`bpy`) e a biblioteca do
+sistema `libOpenGL.so.0`; `pymeshlab` e o `DifferentiableRenderer` também devem
+ser importáveis no mesmo ambiente que executa o paint.
+
+Após identificar o comando oficial de `gradio_app.py`/`textureGenPipeline.py`,
+configure-o como uma lista JSON, usando os placeholders abaixo:
+
+```bash
+export FORGE3D_TEXTURE_COMMAND_JSON='["python3","/caminho/wrapper_oficial.py","--mesh","{mesh}","--image","{image}","--output","{output}","--resolution","{resolution}","--quality","{quality}"]'
+export FORGE3D_TEXTURE_TIMEOUT_SECONDS=1800
+```
+
+O exemplo descreve o contrato e não afirma qual CLI o checkout Hunyuan publica.
+O wrapper oficial deve produzir exatamente o caminho `{output}`. Para validar
+GPU com um job de shape já concluído:
+
+```bash
+export FORGE3D_TEXTURE_TEST_JOB_ID=<uuid-completed>
+export FORGE3D_TEST_API_URL=http://127.0.0.1:8000
+backend/scripts/test_texture_gpu.sh
+```
+
 ## Endpoints
 
 - `POST /generate/image` — alias temporário do TripoSR.
