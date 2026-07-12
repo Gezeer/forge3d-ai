@@ -1,0 +1,4 @@
+const items = ["Criar 3D", "Meus modelos", "Histórico", "API", "Configurações"] as const;
+export function Sidebar({ active, onNavigate }: { active: string; onNavigate: (item: string) => void }) {
+  return <aside className="sidebar"><div className="brand"><span className="brand-mark">F3</span><div><b>Forge3D</b><small>AI STUDIO</small></div></div><nav aria-label="Navegação principal">{items.map((item, index) => <button key={item} className={active === item ? "active" : ""} disabled={!([0, 2].includes(index))} onClick={() => onNavigate(item)}><span>{["✦", "◫", "◷", "⌘", "⚙"][index]}</span>{item}{index > 1 && index !== 2 ? <small>EM BREVE</small> : null}</button>)}</nav><div className="sidebar-foot"><span className="status-dot" />GPU workspace conectado<small>Forge3D MVP · v0.1</small></div></aside>;
+}
