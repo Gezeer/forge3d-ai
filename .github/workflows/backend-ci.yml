@@ -1,0 +1,37 @@
+name: Backend CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, backup-runpod-julho, "feature/**"]
+
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install lightweight development dependencies
+        run: python -m pip install -e '.[test]'
+      - name: Lint
+        run: ruff check backend
+      - name: Format check
+        run: ruff format --check backend
+      - name: Tests without GPU
+        run: pytest -m 'not gpu'
+      - name: Compile Python
+        run: python -m py_compile $(find backend -name '*.py' -type f)
+      - name: Check whitespace
+        run: git diff --check
+      - name: Validate shell scripts
+        run: bash -n backend/scripts/start_local.sh backend/scripts/start_runpod.sh

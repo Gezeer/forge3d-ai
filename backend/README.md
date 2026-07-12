@@ -87,6 +87,41 @@ A concorrência e capacidade da fila são controladas por
 memória: jobs que ainda não começaram não são retomados automaticamente após
 reinício do processo.
 
+## Observabilidade
+
+Use `FORGE3D_LOG_LEVEL` para controlar o nível e `FORGE3D_LOG_FORMAT=text` em
+desenvolvimento. Em produção, `FORGE3D_LOG_FORMAT=json` gera um objeto JSON por
+linha com campos seguros como `request_id`, `job_id`, engine, status, duração e
+código de erro. Imagens, tokens, segredos e stderr integral não são registrados.
+
+Toda resposta inclui `X-Request-ID`. Um UUID válido enviado nesse header é
+preservado; caso contrário, a API gera um novo.
+
+- `/health/live` confirma somente que o processo responde e não consulta engines.
+- `/health/ready` confirma storage, repositório, fila e ao menos uma engine.
+- `/health` apresenta o diagnóstico detalhado, preservando os campos legados.
+
+Probes usam `FORGE3D_HEALTH_TIMEOUT_SECONDS`. Hunyuan desligado deixa a saúde
+geral como `degraded` quando o TripoSR está disponível.
+
+`GET /metrics` expõe o formato Prometheus no mesmo servidor. Pode ser desligado
+com `FORGE3D_METRICS_ENABLED=false`. Labels nunca incluem filename, job ID ou
+request ID.
+
+## Validações do CI
+
+O GitHub Actions usa Python 3.9 e 3.12 e não baixa modelos. Execute localmente:
+
+```bash
+PYTHONPATH=backend .venv/bin/python -m ruff check backend
+PYTHONPATH=backend .venv/bin/python -m ruff format --check backend
+PYTHONPATH=backend .venv/bin/python -m pytest -m 'not gpu'
+PYTHONPYCACHEPREFIX=/tmp/forge3d-pycache \
+  .venv/bin/python -m py_compile $(find backend -name '*.py' -type f)
+git diff --check
+bash -n backend/scripts/start_local.sh backend/scripts/start_runpod.sh
+```
+
 ## Testes
 
 ```bash

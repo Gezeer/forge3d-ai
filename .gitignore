@@ -1,6 +1,7 @@
 node_modules/
 .venv/
 .runtime/
+.ruff_cache/
 .next/
 __pycache__/
 *.pyc
