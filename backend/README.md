@@ -152,6 +152,40 @@ como problemáticas no RunPod são Blender Python (`bpy`) e a biblioteca do
 sistema `libOpenGL.so.0`; `pymeshlab` e o `DifferentiableRenderer` também devem
 ser importáveis no mesmo ambiente que executa o paint.
 
+### Compilar o mesh inpaint oficial
+
+O `mesh_inpaint_processor` é uma extensão C++/pybind11 do Hunyuan Paint. Ela
+deve ser compilada com o mesmo interpretador que executa o pipeline; misturar o
+`python` do ambiente virtual com o `python3-config` do sistema pode gerar um
+arquivo com ABI incompatível.
+
+```bash
+cd /workspace/forge3d-ai
+export HUNYUAN_ROOT=/workspace/kai3d/models/Hunyuan3D-2.1
+export HUNYUAN_PYTHON=/workspace/kai3d/models/Hunyuan3D-2.1/venv/bin/python
+backend/scripts/compile_hunyuan_mesh_inpaint.sh
+```
+
+O script não instala dependências. Ele usa o interpretador indicado tanto nos
+includes do pybind11 quanto no sufixo ABI, compila o módulo no diretório oficial
+e executa o teste de importação. Para também chamar a função com uma entrada
+NumPy mínima:
+
+```bash
+PYTHONPATH="$HUNYUAN_ROOT" "$HUNYUAN_PYTHON" \
+  backend/scripts/test_hunyuan_mesh_inpaint.py \
+  --root "$HUNYUAN_ROOT" --functional
+```
+
+O patch opcional `backend/patches/hunyuan_meshrender_mesh_inpaint.patch` faz o
+`MeshRender.py` preservar a causa original do `ImportError`, em vez de continuar
+sem definir `meshVerticeInpaint` e falhar depois com `NameError`:
+
+```bash
+cd "$HUNYUAN_ROOT"
+git apply /workspace/forge3d-ai/backend/patches/hunyuan_meshrender_mesh_inpaint.patch
+```
+
 Após identificar o comando oficial de `gradio_app.py`/`textureGenPipeline.py`,
 configure-o como uma lista JSON, usando os placeholders abaixo:
 

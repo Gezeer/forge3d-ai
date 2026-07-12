@@ -9,6 +9,7 @@ from pathlib import Path
 
 LOG = logging.getLogger("forge3d.hunyuan.paint")
 
+
 def install_torchvision_compatibility() -> None:
     try:
         import torchvision.transforms.functional as functional
@@ -32,6 +33,7 @@ def install_torchvision_compatibility() -> None:
 
     sys.modules[module_name] = compatibility_module
 
+
 def install_bpy_compatibility() -> None:
     """
     O Paint usa load_mesh/save_mesh do módulo real mesh_utils.
@@ -45,9 +47,7 @@ def install_bpy_compatibility() -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Forge3D Hunyuan Paint Wrapper"
-    )
+    parser = argparse.ArgumentParser(description="Forge3D Hunyuan Paint Wrapper")
 
     parser.add_argument(
         "--root",
@@ -110,8 +110,8 @@ def build_pipeline(root: Path, resolution: int):
         sys.path.insert(0, str(hy3dpaint))
 
     from hy3dpaint.textureGenPipeline import (
-        Hunyuan3DPaintPipeline,
         Hunyuan3DPaintConfig,
+        Hunyuan3DPaintPipeline,
     )
 
     conf = Hunyuan3DPaintConfig(
@@ -127,9 +127,7 @@ def build_pipeline(root: Path, resolution: int):
         root / "hy3dpaint" / "cfgs" / "hunyuan-paint-pbr.yaml"
     )
 
-    conf.custom_pipeline = str(
-        root / "hy3dpaint" / "hunyuanpaintpbr"
-    )
+    conf.custom_pipeline = str(root / "hy3dpaint" / "hunyuanpaintpbr")
 
     return Hunyuan3DPaintPipeline(conf)
 
@@ -163,9 +161,7 @@ def ensure_output_exists(output: Path):
     if output.exists():
         return
 
-    raise FileNotFoundError(
-        f"Arquivo não gerado: {output}"
-    )
+    raise FileNotFoundError(f"Arquivo não gerado: {output}")
 
 
 def write_metadata(
@@ -192,11 +188,7 @@ def write_metadata(
         "resolution": resolution,
         "quality": quality,
         "output_name": output.name,
-        "output_size_bytes": (
-            output.stat().st_size
-            if output.exists()
-            else 0
-        ),
+        "output_size_bytes": (output.stat().st_size if output.exists() else 0),
     }
 
     metadata_path.write_text(
@@ -216,24 +208,16 @@ def validate_inputs(
     output: Path,
 ) -> None:
     if not root.is_dir():
-        raise FileNotFoundError(
-            f"Raiz Hunyuan não encontrada: {root}"
-        )
+        raise FileNotFoundError(f"Raiz Hunyuan não encontrada: {root}")
 
     if not mesh.is_file():
-        raise FileNotFoundError(
-            f"Mesh não encontrada: {mesh}"
-        )
+        raise FileNotFoundError(f"Mesh não encontrada: {mesh}")
 
     if not image.is_file():
-        raise FileNotFoundError(
-            f"Imagem não encontrada: {image}"
-        )
+        raise FileNotFoundError(f"Imagem não encontrada: {image}")
 
     if output.suffix.lower() != ".obj":
-        raise ValueError(
-            "A saída do Paint deve ser um arquivo .obj"
-        )
+        raise ValueError("A saída do Paint deve ser um arquivo .obj")
 
 
 def main() -> int:
@@ -250,9 +234,7 @@ def main() -> int:
     output = Path(args.output).expanduser().resolve()
 
     metadata_path = (
-        Path(args.metadata).expanduser().resolve()
-        if args.metadata
-        else None
+        Path(args.metadata).expanduser().resolve() if args.metadata else None
     )
 
     try:

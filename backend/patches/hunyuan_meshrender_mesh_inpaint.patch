@@ -1,0 +1,18 @@
+diff --git a/hy3dpaint/DifferentiableRenderer/MeshRender.py b/hy3dpaint/DifferentiableRenderer/MeshRender.py
+--- a/hy3dpaint/DifferentiableRenderer/MeshRender.py
++++ b/hy3dpaint/DifferentiableRenderer/MeshRender.py
+@@ -34,9 +34,12 @@ except:
+     print("Bpy IO CAN NOT BE Imported!!!")
+ 
+ try:
+     from .mesh_inpaint_processor import meshVerticeInpaint  # , meshVerticeColor
+-except:
+-    print("InPaint Function CAN NOT BE Imported!!!")
++except ImportError as exc:
++    raise ImportError(
++        "Hunyuan mesh_inpaint_processor is unavailable or ABI-incompatible. "
++        "Compile it with the same Python interpreter used to run Hunyuan Paint."
++    ) from exc
+ 
+ 
+ class RenderMode(Enum):
