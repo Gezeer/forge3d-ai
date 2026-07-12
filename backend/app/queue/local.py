@@ -3,12 +3,13 @@ from __future__ import annotations
 import logging
 import queue as queue_module
 import threading
-from typing import List, Union
+from typing import List, Optional, Union
 
 from app.core.exceptions import JobQueueFullError
 from app.domain.jobs import JobRepository
 from app.queue.contracts import JobQueue, QueuedJob
 from app.queue.executor import JobExecutor
+from app.texture.executor import TextureExecutor, TextureQueuedJob
 
 logger = logging.getLogger("forge3d.queue")
 _STOP = object()
@@ -21,6 +22,7 @@ class LocalJobQueue(JobQueue):
         jobs: JobRepository,
         concurrency: int = 1,
         max_size: int = 100,
+        texture_executor: Optional[TextureExecutor] = None,
     ) -> None:
         if concurrency < 1:
             raise ValueError("Queue concurrency must be at least 1")
@@ -30,6 +32,7 @@ class LocalJobQueue(JobQueue):
         self.jobs = jobs
         self.concurrency = concurrency
         self.max_size = max_size
+        self.texture_executor = texture_executor
         self._queue: queue_module.Queue[Union[QueuedJob, object]] = queue_module.Queue(
             maxsize=max_size
         )
@@ -91,15 +94,27 @@ class LocalJobQueue(JobQueue):
             },
         )
 
+    def enqueue_texture(self, task: TextureQueuedJob) -> None:
+        with self._enqueue_lock:
+            if self._queue.full():
+                raise JobQueueFullError("A fila local está cheia")
+            self.jobs.save(task.job)
+            self._queue.put_nowait(task)
+
     def _worker(self) -> None:
         while True:
             task = self._queue.get()
             try:
                 if task is _STOP:
                     return
-                assert isinstance(task, QueuedJob)
+                assert isinstance(task, (QueuedJob, TextureQueuedJob))
                 try:
-                    self.executor.execute(task)
+                    if isinstance(task, TextureQueuedJob):
+                        if self.texture_executor is None:
+                            raise RuntimeError("Texture executor unavailable")
+                        self.texture_executor.execute(task)
+                    else:
+                        self.executor.execute(task)
                 except Exception as error:
                     logger.error(
                         "job_execution_failed job_id=%s engine=%s error_code=%s",

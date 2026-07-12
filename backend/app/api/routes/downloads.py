@@ -10,6 +10,24 @@ from app.domain.jobs import JobStatus
 router = APIRouter(tags=["downloads"])
 
 
+@router.get("/download/{job_id}/textured")
+def download_textured(
+    job_id: UUID, container: Container = Depends(get_container)
+) -> FileResponse:
+    job = container.jobs.get(job_id)
+    if job is None or not job.texture_artifact_relative_path:
+        raise HTTPException(status_code=404, detail="Modelo texturizado não encontrado")
+    try:
+        artifact = container.storage.artifact_for_job(
+            job_id, job.texture_artifact_relative_path
+        )
+    except ArtifactNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(
+        path=artifact, filename="model_textured.glb", media_type="model/gltf-binary"
+    )
+
+
 @router.get("/download/{job_id}")
 def download(
     job_id: UUID, container: Container = Depends(get_container)

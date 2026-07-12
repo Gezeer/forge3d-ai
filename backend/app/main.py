@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.dependencies import Container
 from app.api.handlers.errors import install_error_handlers
-from app.api.routes import downloads, generation, health, metrics
+from app.api.routes import downloads, generation, health, metrics, texture
 from app.core.config import Settings
 from app.engines.policy import AutoEnginePolicy
 from app.engines.registry import EngineRegistry
@@ -24,6 +24,8 @@ from app.queue.local import LocalJobQueue
 from app.services.hunyuan import HunyuanService
 from app.services.triposr import TripoSRService
 from app.services.upload_validation import UploadValidator
+from app.texture.executor import TextureExecutor
+from app.texture.hunyuan import HunyuanTextureService
 
 
 def build_container(settings: Settings) -> Container:
@@ -40,11 +42,14 @@ def build_container(settings: Settings) -> Container:
     )
     metrics_registry = MetricsRegistry(settings.metrics_enabled)
     executor = JobExecutor(jobs, registry, metrics_registry)
+    texture_service = HunyuanTextureService(settings, SubprocessRunner())
+    texture_executor = TextureExecutor(jobs, texture_service)
     job_queue = LocalJobQueue(
         executor,
         jobs,
         concurrency=settings.queue_concurrency,
         max_size=settings.queue_max_size,
+        texture_executor=texture_executor,
     )
     return Container(
         settings=settings,
@@ -101,6 +106,7 @@ def create_app(
     application.include_router(generation.router)
     application.include_router(downloads.router)
     application.include_router(metrics.router)
+    application.include_router(texture.router)
     install_error_handlers(application)
     return application
 

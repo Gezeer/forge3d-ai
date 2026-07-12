@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from app.domain.jobs import Job, JobStatus
+from app.domain.jobs import Job, JobStatus, TextureStatus
 
 
 class GenerationResponse(BaseModel):
@@ -40,6 +40,10 @@ class JobResponse(BaseModel):
     download_url: Optional[str] = None
     error: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    texture_status: Optional[TextureStatus] = None
+    texture_download_url: Optional[str] = None
+    texture_error: Optional[str] = None
+    texture_metadata: Optional[Dict[str, Any]] = None
 
     @classmethod
     def from_job(cls, job: Job) -> "JobResponse":
@@ -52,7 +56,24 @@ class JobResponse(BaseModel):
             ),
             error=job.error,
             metadata=job.metadata,
+            texture_status=job.texture_status,
+            texture_download_url=(
+                f"/download/{job.id}/textured"
+                if job.texture_status == TextureStatus.COMPLETED
+                else None
+            ),
+            texture_error=job.texture_error,
+            texture_metadata=job.texture_metadata,
         )
+
+
+class TextureJobResponse(BaseModel):
+    job_id: UUID
+    engine: str
+    status: TextureStatus
+    status_url: str
+    original_download_url: str
+    textured_download_url: Optional[str] = None
 
 
 class HealthResponse(BaseModel):

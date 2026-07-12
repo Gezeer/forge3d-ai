@@ -44,6 +44,10 @@ class Settings:
     log_format: str = "text"
     metrics_enabled: bool = True
     health_timeout_seconds: float = 2.0
+    texture_root: Path = Path("/workspace/kai3d/models/Hunyuan3D-2.1")
+    texture_command_json: str = ""
+    texture_timeout_seconds: float = 1800.0
+    texture_pipeline_version: str = "hunyuan3d-2.1"
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] = os.environ) -> "Settings":
@@ -105,6 +109,18 @@ class Settings:
             in {"1", "true", "yes", "on"},
             health_timeout_seconds=float(
                 environ.get("FORGE3D_HEALTH_TIMEOUT_SECONDS", "2")
+            ),
+            texture_root=Path(
+                environ.get(
+                    "FORGE3D_TEXTURE_ROOT", "/workspace/kai3d/models/Hunyuan3D-2.1"
+                )
+            ),
+            texture_command_json=environ.get("FORGE3D_TEXTURE_COMMAND_JSON", ""),
+            texture_timeout_seconds=float(
+                environ.get("FORGE3D_TEXTURE_TIMEOUT_SECONDS", "1800")
+            ),
+            texture_pipeline_version=environ.get(
+                "FORGE3D_TEXTURE_PIPELINE_VERSION", "hunyuan3d-2.1"
             ),
         )
 

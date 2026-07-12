@@ -14,6 +14,13 @@ class JobStatus(str, Enum):
     FAILED = "failed"
 
 
+class TextureStatus(str, Enum):
+    QUEUED = "texture_queued"
+    PROCESSING = "texturing"
+    COMPLETED = "textured"
+    FAILED = "texture_failed"
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -28,6 +35,10 @@ class Job:
     artifact_relative_path: Optional[str] = None
     error: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    texture_status: Optional[TextureStatus] = None
+    texture_artifact_relative_path: Optional[str] = None
+    texture_error: Optional[str] = None
+    texture_metadata: Optional[Dict[str, Any]] = None
 
     @classmethod
     def queued(cls, job_id: UUID, engine: str) -> "Job":
@@ -65,6 +76,44 @@ class Job:
             artifact_relative_path=artifact_relative_path,
             error=error,
             metadata=metadata,
+            texture_status=self.texture_status,
+            texture_artifact_relative_path=self.texture_artifact_relative_path,
+            texture_error=self.texture_error,
+            texture_metadata=self.texture_metadata,
+        )
+
+    def transition_texture(
+        self,
+        status: TextureStatus,
+        *,
+        artifact_relative_path: Optional[str] = None,
+        error: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> "Job":
+        allowed = {
+            None: {TextureStatus.QUEUED},
+            TextureStatus.QUEUED: {TextureStatus.PROCESSING, TextureStatus.FAILED},
+            TextureStatus.PROCESSING: {TextureStatus.COMPLETED, TextureStatus.FAILED},
+            TextureStatus.COMPLETED: {TextureStatus.QUEUED},
+            TextureStatus.FAILED: {TextureStatus.QUEUED},
+        }
+        if status not in allowed[self.texture_status]:
+            raise ValueError(
+                f"Invalid texture transition: {self.texture_status} -> {status}"
+            )
+        return Job(
+            id=self.id,
+            engine=self.engine,
+            status=self.status,
+            created_at=self.created_at,
+            updated_at=utc_now(),
+            artifact_relative_path=self.artifact_relative_path,
+            error=self.error,
+            metadata=self.metadata,
+            texture_status=status,
+            texture_artifact_relative_path=artifact_relative_path,
+            texture_error=error,
+            texture_metadata=metadata,
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -84,6 +133,14 @@ class Job:
             artifact_relative_path=payload.get("artifact_relative_path"),
             error=payload.get("error"),
             metadata=payload.get("metadata"),
+            texture_status=TextureStatus(payload["texture_status"])
+            if payload.get("texture_status")
+            else None,
+            texture_artifact_relative_path=payload.get(
+                "texture_artifact_relative_path"
+            ),
+            texture_error=payload.get("texture_error"),
+            texture_metadata=payload.get("texture_metadata"),
         )
 
 
