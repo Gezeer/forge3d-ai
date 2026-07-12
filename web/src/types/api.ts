@@ -1,5 +1,6 @@
 export type Engine = "auto" | "triposr" | "hunyuan";
 export type JobStatus = "queued" | "processing" | "completed" | "failed";
+export type TextureStatus = "texture_queued" | "texturing" | "textured" | "texture_failed";
 
 export interface CreateJobResponse {
   job_id: string;
@@ -15,7 +16,13 @@ export interface JobResponse {
   download_url?: string | null;
   error?: string | null;
   metadata?: Record<string, unknown> | null;
+  texture_status?: TextureStatus | null;
+  texture_download_url?: string | null;
+  texture_error?: string | null;
+  texture_metadata?: Record<string, unknown> | null;
 }
+
+export interface TextureJobResponse { job_id: string; engine: "hunyuan"; status: TextureStatus; status_url: string; original_download_url: string; textured_download_url?: string | null; }
 
 export interface HealthResponse {
   api: string;

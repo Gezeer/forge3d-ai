@@ -5,6 +5,7 @@ import {
   ForgeApiError,
   HealthResponse,
   JobResponse,
+  TextureJobResponse,
 } from "@/types/api";
 
 const API_URL = (process.env.NEXT_PUBLIC_FORGE3D_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
@@ -55,3 +56,11 @@ export function getDownloadUrl(jobId: string): string {
 export function getHealth(): Promise<HealthResponse> {
   return request<HealthResponse>("/health", undefined, 5_000);
 }
+
+export function createTextureJob(jobId: string, options: { resolution?: number; quality?: "fast" | "standard" | "high"; file?: File } = {}): Promise<TextureJobResponse> {
+  const form = new FormData(); form.append("engine", "hunyuan"); form.append("resolution", String(options.resolution || 2048)); form.append("quality", options.quality || "standard"); if (options.file) form.append("file", options.file);
+  return request<TextureJobResponse>(`/jobs/${encodeURIComponent(jobId)}/texture`, { method: "POST", body: form }, 30_000);
+}
+
+export function getTextureStatus(jobId: string): Promise<TextureJobResponse> { return request<TextureJobResponse>(`/jobs/${encodeURIComponent(jobId)}/texture`); }
+export function getTexturedDownloadUrl(jobId: string): string { return `${API_URL}/download/${encodeURIComponent(jobId)}/textured`; }
