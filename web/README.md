@@ -31,3 +31,5 @@ npm run build
 ```
 
 O diretório `frontend/` na raiz é legado e não faz parte da aplicação ativa.
+Os componentes Next substituídos nesta sprint estão preservados em
+`web/legacy/components/` e também não são importados pela aplicação.
