@@ -26,6 +26,10 @@ def test_settings_can_be_overridden() -> None:
             "FORGE3D_OUTPUT_DIR": "/tmp/custom-output",
             "FORGE3D_TRIPOSR_DEVICE": "cuda:1",
             "FORGE3D_CORS_ORIGINS": "https://one.test,https://two.test",
+            "FORGE3D_QUEUE_CONCURRENCY": "3",
+            "FORGE3D_QUEUE_MAX_SIZE": "25",
+            "FORGE3D_DEFAULT_ENGINE": "hunyuan",
+            "FORGE3D_AUTO_ENGINE_FALLBACK": "triposr",
         }
     )
 
@@ -33,6 +37,10 @@ def test_settings_can_be_overridden() -> None:
     assert settings.jobs_file == Path("/tmp/custom-output/jobs.json")
     assert settings.triposr_device == "cuda:1"
     assert settings.cors_origins == ("https://one.test", "https://two.test")
+    assert settings.queue_concurrency == 3
+    assert settings.queue_max_size == 25
+    assert settings.default_engine == "hunyuan"
+    assert settings.auto_engine_fallback == "triposr"
 
 
 @pytest.mark.parametrize(

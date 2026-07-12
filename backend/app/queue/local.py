@@ -75,7 +75,10 @@ class LocalJobQueue(JobQueue):
             except queue_module.Full as exc:
                 raise JobQueueFullError("A fila local está cheia") from exc
         logger.info(
-            "job_enqueued",
+            "job_enqueued job_id=%s engine=%s status=%s",
+            str(task.job.id),
+            task.job.engine,
+            task.job.status.value,
             extra={
                 "job_id": str(task.job.id),
                 "engine": task.job.engine,
@@ -94,7 +97,9 @@ class LocalJobQueue(JobQueue):
                     self.executor.execute(task)
                 except Exception:
                     logger.exception(
-                        "job_execution_failed",
+                        "job_execution_failed job_id=%s engine=%s",
+                        str(task.job.id),
+                        task.job.engine,
                         extra={
                             "job_id": str(task.job.id),
                             "engine": task.job.engine,

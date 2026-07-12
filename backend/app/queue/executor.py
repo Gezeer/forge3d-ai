@@ -26,7 +26,12 @@ class JobExecutor:
         error: str = "",
     ) -> None:
         logger.info(
-            "job_state_changed",
+            "job_state_changed job_id=%s engine=%s status=%s duration=%.3f error=%s",
+            str(task.job.id),
+            task.job.engine,
+            status.value,
+            duration,
+            error or "none",
             extra={
                 "job_id": str(task.job.id),
                 "engine": task.job.engine,

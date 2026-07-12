@@ -71,7 +71,6 @@ def _client(
         jobs_file=tmp_path / "outputs" / "jobs.json",
         environment=environment,
         upload_max_bytes=max_bytes,
-        auto_engine=auto_preferred,
     )
     storage = LocalStorage(settings.upload_dir, settings.output_dir)
     registry = EngineRegistry()

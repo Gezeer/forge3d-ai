@@ -13,6 +13,9 @@ do RunPod e o Hunyuan fica isolado atrás de um gateway Gradio configurável.
 - O repositório JSON implementa uma interface substituível futuramente por
   PostgreSQL.
 - O Hunyuan não presume a assinatura da UI Gradio.
+- Engines implementam um contrato comum e são resolvidas por `EngineRegistry`.
+- A fila local implementa `JobQueue`, que pode ganhar outro adaptador no futuro.
+- Workers locais só são iniciados e encerrados pelo lifespan do FastAPI.
 
 ## Desenvolvimento local sem modelos
 
@@ -64,14 +67,25 @@ integração Hunyuan só pode ser validada após inspeção e geração real no 
 - `POST /generate/image` — alias temporário do TripoSR.
 - `POST /generate/triposr` — TripoSR explícito.
 - `POST /generate/hunyuan` — Hunyuan explícito.
-- `POST /generate/auto` — motor definido por `FORGE3D_AUTO_ENGINE`.
+- `POST /generate/auto` — seleção pela política automática isolada.
+- `POST /jobs/generate` — enfileira geração e responde imediatamente com HTTP 202.
 - `GET /download/{job_id}` — download do artefato concluído.
 - `GET /jobs/{job_id}` — estado e metadados do job.
 - `GET /health` — saúde da API e configuração local.
 
 As gerações ainda são síncronas nesta fase: o estado é persistido, mas a
-resposta do POST chega quando o gerador termina. Uma fila externa pode ser
-adicionada depois sem mudar o contrato do repositório de jobs.
+resposta dos endpoints legados chega quando o gerador termina. O endpoint
+`/jobs/generate` usa a fila local e responde antes da geração terminar.
+
+O formulário do novo endpoint recebe `file` e `engine`, que pode ser `auto`,
+`triposr` ou `hunyuan`. A política `auto` prefere Hunyuan quando ele está
+configurado e disponível, usando `FORGE3D_AUTO_ENGINE_FALLBACK` como fallback.
+`FORGE3D_DEFAULT_ENGINE` é usado quando o campo `engine` não é enviado.
+
+A concorrência e capacidade da fila são controladas por
+`FORGE3D_QUEUE_CONCURRENCY` e `FORGE3D_QUEUE_MAX_SIZE`. A fila é somente em
+memória: jobs que ainda não começaram não são retomados automaticamente após
+reinício do processo.
 
 ## Testes
 
