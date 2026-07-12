@@ -2,11 +2,10 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-
 from app.core.config import Settings
 from app.core.exceptions import ArtifactNotFoundError, GenerationError
-from app.infrastructure.subprocess_runner import ProcessResult
 from app.engines.contracts import JobContext
+from app.infrastructure.subprocess_runner import ProcessResult
 from app.services.triposr import TripoSRService
 
 

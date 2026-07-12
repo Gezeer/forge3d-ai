@@ -2,7 +2,6 @@ from concurrent.futures import Future
 from pathlib import Path
 
 import pytest
-
 from app.core.exceptions import ServiceUnavailableError
 from app.infrastructure.hunyuan_gateway import (
     GradioHunyuanGateway,
@@ -29,9 +28,7 @@ def test_gateway_injects_image_into_inspected_signature() -> None:
         client_factory=lambda _: client,
         file_handler=lambda path: f"handled:{path}",
     )
-    signature = HunyuanSignature(
-        args=[None, {"$image": True}], kwargs={"seed": 1234}
-    )
+    signature = HunyuanSignature(args=[None, {"$image": True}], kwargs={"seed": 1234})
 
     result = gateway.predict(Path("/tmp/image.png"), signature, "/real", 5)
 

@@ -6,7 +6,6 @@ from pathlib import Path
 import httpx
 import pytest
 
-
 pytestmark = [
     pytest.mark.gpu,
     pytest.mark.skipif(

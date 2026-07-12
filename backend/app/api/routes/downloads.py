@@ -1,4 +1,3 @@
-from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,7 +6,6 @@ from fastapi.responses import FileResponse
 from app.api.dependencies import Container, get_container
 from app.core.exceptions import ArtifactNotFoundError
 from app.domain.jobs import JobStatus
-
 
 router = APIRouter(tags=["downloads"])
 

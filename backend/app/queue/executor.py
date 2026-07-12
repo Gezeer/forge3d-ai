@@ -8,14 +8,16 @@ from app.domain.jobs import JobRepository, JobStatus
 from app.engines.registry import EngineRegistry
 from app.queue.contracts import QueuedJob
 
-
 logger = logging.getLogger("forge3d.jobs")
 
 
 class JobExecutor:
-    def __init__(self, jobs: JobRepository, engines: EngineRegistry) -> None:
+    def __init__(
+        self, jobs: JobRepository, engines: EngineRegistry, metrics=None
+    ) -> None:
         self.jobs = jobs
         self.engines = engines
+        self.metrics = metrics
 
     def _log_state(
         self,
@@ -23,7 +25,7 @@ class JobExecutor:
         status: JobStatus,
         *,
         duration: float = 0.0,
-        error: str = "",
+        error_code: str = "",
     ) -> None:
         logger.info(
             "job_state_changed job_id=%s engine=%s status=%s duration=%.3f error=%s",
@@ -31,13 +33,13 @@ class JobExecutor:
             task.job.engine,
             status.value,
             duration,
-            error or "none",
+            error_code or "none",
             extra={
                 "job_id": str(task.job.id),
                 "engine": task.job.engine,
                 "job_status": status.value,
                 "duration_seconds": round(duration, 3),
-                "job_error": error,
+                "error_code": error_code,
             },
         )
 
@@ -45,6 +47,8 @@ class JobExecutor:
         job = self.jobs.get(task.job.id) or task.job
         job = self.jobs.save(job.transition(JobStatus.PROCESSING))
         self._log_state(task, JobStatus.PROCESSING)
+        if self.metrics:
+            self.metrics.observe_job(task.job.engine, JobStatus.PROCESSING.value)
         started = time.monotonic()
         try:
             engine = self.engines.get(job.engine)
@@ -58,17 +62,19 @@ class JobExecutor:
                 )
             )
             self._log_state(task, JobStatus.COMPLETED, duration=duration)
+            if self.metrics:
+                self.metrics.observe_job(task.job.engine, "completed", duration)
             return result
         except Exception as error:
             duration = time.monotonic() - started
-            normalized_error = f"{type(error).__name__}: {error}"
-            self.jobs.save(
-                job.transition(JobStatus.FAILED, error=normalized_error)
-            )
+            normalized_error = type(error).__name__
+            self.jobs.save(job.transition(JobStatus.FAILED, error=normalized_error))
             self._log_state(
                 task,
                 JobStatus.FAILED,
                 duration=duration,
-                error=normalized_error,
+                error_code=normalized_error,
             )
+            if self.metrics:
+                self.metrics.observe_job(task.job.engine, "failed", duration)
             raise

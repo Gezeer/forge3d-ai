@@ -1,8 +1,6 @@
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
-
 from app.core.exceptions import (
     EngineAlreadyRegisteredError,
     EngineNotFoundError,

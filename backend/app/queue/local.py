@@ -10,7 +10,6 @@ from app.domain.jobs import JobRepository
 from app.queue.contracts import JobQueue, QueuedJob
 from app.queue.executor import JobExecutor
 
-
 logger = logging.getLogger("forge3d.queue")
 _STOP = object()
 
@@ -31,8 +30,8 @@ class LocalJobQueue(JobQueue):
         self.jobs = jobs
         self.concurrency = concurrency
         self.max_size = max_size
-        self._queue: queue_module.Queue[Union[QueuedJob, object]] = (
-            queue_module.Queue(maxsize=max_size)
+        self._queue: queue_module.Queue[Union[QueuedJob, object]] = queue_module.Queue(
+            maxsize=max_size
         )
         self._workers: List[threading.Thread] = []
         self._enqueue_lock = threading.Lock()
@@ -45,6 +44,10 @@ class LocalJobQueue(JobQueue):
     @property
     def workers_alive(self) -> int:
         return sum(worker.is_alive() for worker in self._workers)
+
+    @property
+    def size(self) -> int:
+        return self._queue.qsize()
 
     def start(self) -> None:
         if self._started:
@@ -70,6 +73,8 @@ class LocalJobQueue(JobQueue):
             if self._queue.full():
                 raise JobQueueFullError("A fila local está cheia")
             self.jobs.save(task.job)
+            if self.executor.metrics:
+                self.executor.metrics.observe_job(task.job.engine, "queued")
             try:
                 self._queue.put_nowait(task)
             except queue_module.Full as exc:
@@ -95,14 +100,16 @@ class LocalJobQueue(JobQueue):
                 assert isinstance(task, QueuedJob)
                 try:
                     self.executor.execute(task)
-                except Exception:
-                    logger.exception(
-                        "job_execution_failed job_id=%s engine=%s",
+                except Exception as error:
+                    logger.error(
+                        "job_execution_failed job_id=%s engine=%s error_code=%s",
                         str(task.job.id),
                         task.job.engine,
+                        type(error).__name__,
                         extra={
                             "job_id": str(task.job.id),
                             "engine": task.job.engine,
+                            "error_code": type(error).__name__,
                         },
                     )
             finally:

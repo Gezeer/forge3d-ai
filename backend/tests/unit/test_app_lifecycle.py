@@ -1,9 +1,8 @@
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
 from app.core.config import Settings
 from app.main import build_container, create_app
+from fastapi.testclient import TestClient
 
 
 def test_building_application_does_not_start_queue_workers(tmp_path: Path) -> None:

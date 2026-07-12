@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import threading
-import time
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
-
 from app.core.exceptions import JobQueueFullError
 from app.domain.generation import GenerationResult
 from app.domain.jobs import Job, JobStatus
@@ -119,7 +117,7 @@ def test_failure_does_not_kill_worker_or_next_job(tmp_path: Path) -> None:
     queue.stop()
 
     assert jobs.get(failed.job.id).status == JobStatus.FAILED
-    assert "RuntimeError: failure 1" in jobs.get(failed.job.id).error
+    assert jobs.get(failed.job.id).error == "RuntimeError"
     assert jobs.get(completed.job.id).status == JobStatus.COMPLETED
     assert engine.calls == 2
 

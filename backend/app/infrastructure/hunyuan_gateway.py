@@ -6,7 +6,6 @@ from typing import Any, Callable, Dict, List, Optional, Protocol
 
 from app.core.exceptions import GenerationTimeoutError, ServiceUnavailableError
 
-
 IMAGE_MARKER = "$image"
 
 
@@ -17,8 +16,7 @@ class HunyuanSignature:
 
 
 class HunyuanGateway(Protocol):
-    def available(self) -> bool:
-        ...
+    def available(self) -> bool: ...
 
     def predict(
         self,
@@ -26,12 +24,11 @@ class HunyuanGateway(Protocol):
         signature: HunyuanSignature,
         api_name: str,
         timeout: float,
-    ) -> Any:
-        ...
+    ) -> Any: ...
 
 
 class GradioHunyuanGateway:
-    """Lazy adapter around gradio_client; importing this module does not import Gradio."""
+    """Lazy Gradio adapter that does not import the client at module import."""
 
     def __init__(
         self,
@@ -82,8 +79,7 @@ class GradioHunyuanGateway:
             return [self._inject_image(item, image_path) for item in value]
         if isinstance(value, dict):
             return {
-                key: self._inject_image(item, image_path)
-                for key, item in value.items()
+                key: self._inject_image(item, image_path) for key, item in value.items()
             }
         return value
 

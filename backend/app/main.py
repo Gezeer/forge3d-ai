@@ -7,7 +7,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.dependencies import Container
-from app.api.routes import downloads, generation, health
+from app.api.handlers.errors import install_error_handlers
+from app.api.routes import downloads, generation, health, metrics
 from app.core.config import Settings
 from app.engines.policy import AutoEnginePolicy
 from app.engines.registry import EngineRegistry
@@ -15,6 +16,9 @@ from app.infrastructure.hunyuan_gateway import GradioHunyuanGateway
 from app.infrastructure.job_repository import JsonJobRepository
 from app.infrastructure.storage import LocalStorage
 from app.infrastructure.subprocess_runner import SubprocessRunner
+from app.middleware.request_context import RequestContextMiddleware
+from app.observability.logging import configure_logging
+from app.observability.metrics import MetricsRegistry
 from app.queue.executor import JobExecutor
 from app.queue.local import LocalJobQueue
 from app.services.hunyuan import HunyuanService
@@ -34,7 +38,8 @@ def build_container(settings: Settings) -> Container:
             GradioHunyuanGateway(settings.hunyuan_url),
         )
     )
-    executor = JobExecutor(jobs, registry)
+    metrics_registry = MetricsRegistry(settings.metrics_enabled)
+    executor = JobExecutor(jobs, registry, metrics_registry)
     job_queue = LocalJobQueue(
         executor,
         jobs,
@@ -55,6 +60,7 @@ def build_container(settings: Settings) -> Container:
         ),
         executor=executor,
         job_queue=job_queue,
+        metrics=metrics_registry,
     )
 
 
@@ -63,6 +69,7 @@ def create_app(
     container: Optional[Container] = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_env()
+    configure_logging(resolved_settings)
     resolved_container = container or build_container(resolved_settings)
 
     @asynccontextmanager
@@ -81,6 +88,8 @@ def create_app(
         lifespan=lifespan,
     )
     application.state.container = resolved_container
+    application.state.metrics = resolved_container.metrics
+    application.add_middleware(RequestContextMiddleware)
     application.add_middleware(
         CORSMiddleware,
         allow_origins=list(resolved_settings.cors_origins),
@@ -91,6 +100,8 @@ def create_app(
     application.include_router(health.router)
     application.include_router(generation.router)
     application.include_router(downloads.router)
+    application.include_router(metrics.router)
+    install_error_handlers(application)
     return application
 
 

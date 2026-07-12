@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, Optional
-from uuid import UUID
+from typing import Any, Iterator, Optional
 
 from app.core.config import Settings
 from app.core.exceptions import ArtifactNotFoundError, ServiceUnavailableError
@@ -87,9 +86,7 @@ class HunyuanService:
             },
         )
 
-    def generate(
-        self, job_context: JobContext, input_image: Path
-    ) -> GenerationResult:
+    def generate(self, job_context: JobContext, input_image: Path) -> GenerationResult:
         job_id = job_context.job_id
         job_dir = job_context.job_dir
         if self.signature is None:

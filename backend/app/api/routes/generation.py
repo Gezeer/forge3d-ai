@@ -5,9 +5,13 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.api.dependencies import Container, get_container
-from app.api.schemas import GenerationResponse, JobResponse, QueuedGenerationResponse
+from app.api.schemas import (
+    ErrorResponse,
+    GenerationResponse,
+    JobResponse,
+    QueuedGenerationResponse,
+)
 from app.core.exceptions import (
-    Forge3DError,
     EngineRegistryError,
     GenerationError,
     GenerationTimeoutError,
@@ -19,7 +23,6 @@ from app.domain.jobs import Job, JobStatus
 from app.engines.contracts import Engine, JobContext
 from app.queue.contracts import QueuedJob
 
-
 router = APIRouter(tags=["generation"])
 
 
@@ -27,13 +30,25 @@ def _http_error(error: Exception, container: Container) -> HTTPException:
     if isinstance(error, InvalidUploadError):
         return HTTPException(status_code=400, detail=str(error))
     if isinstance(error, GenerationTimeoutError):
-        return HTTPException(status_code=504, detail=str(error))
+        return HTTPException(
+            status_code=504,
+            detail=str(error),
+            headers={"X-Error-Code": "generation_timeout"},
+        )
     if isinstance(error, ServiceUnavailableError):
         return HTTPException(status_code=503, detail=str(error))
     if isinstance(error, EngineRegistryError):
-        return HTTPException(status_code=503, detail=str(error))
+        return HTTPException(
+            status_code=503,
+            detail=str(error),
+            headers={"X-Error-Code": "engine_unavailable"},
+        )
     if isinstance(error, JobQueueFullError):
-        return HTTPException(status_code=503, detail=str(error))
+        return HTTPException(
+            status_code=503,
+            detail=str(error),
+            headers={"X-Error-Code": "queue_full"},
+        )
     if isinstance(error, GenerationError):
         detail = str(error)
         if container.settings.expose_process_details and error.details:
@@ -62,9 +77,7 @@ def _generate(
     except Exception as error:
         current = container.jobs.get(job_id)
         if current is not None and current.status == JobStatus.QUEUED:
-            container.jobs.save(
-                current.transition(JobStatus.FAILED, error=str(error))
-            )
+            container.jobs.save(current.transition(JobStatus.FAILED, error=str(error)))
         raise _http_error(error, container) from error
     finally:
         file.file.close()
@@ -89,6 +102,16 @@ def _select_engine(requested: str, container: Container) -> Engine:
     "/jobs/generate",
     response_model=QueuedGenerationResponse,
     status_code=202,
+    summary="Enfileirar geração 3D",
+    description=(
+        "Aceita uma imagem e responde imediatamente. Use status_url para "
+        "acompanhar queued, processing, completed ou failed."
+    ),
+    responses={
+        400: {"model": ErrorResponse, "description": "Upload inválido"},
+        422: {"model": ErrorResponse, "description": "Formulário inválido"},
+        503: {"model": ErrorResponse, "description": "Fila ou engine indisponível"},
+    },
 )
 def enqueue_generation(
     file: UploadFile = File(...),
@@ -102,9 +125,7 @@ def enqueue_generation(
         container.validator.validate_size(file.file)
         job_id = uuid4()
         job_dir = container.storage.create_job_dir(job_id)
-        image_path = container.storage.save_upload(
-            job_dir, file.filename, file.file
-        )
+        image_path = container.storage.save_upload(job_dir, file.filename, file.file)
         job = Job.queued(job_id, selected.name)
         container.job_queue.enqueue(
             QueuedJob(
@@ -164,9 +185,7 @@ def generate_auto(
 
 
 @router.get("/jobs/{job_id}", response_model=JobResponse)
-def get_job(
-    job_id: UUID, container: Container = Depends(get_container)
-) -> JobResponse:
+def get_job(job_id: UUID, container: Container = Depends(get_container)) -> JobResponse:
     job = container.jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job não encontrado")

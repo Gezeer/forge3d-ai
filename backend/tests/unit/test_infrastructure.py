@@ -1,10 +1,9 @@
+import subprocess
 from io import BytesIO
 from pathlib import Path
-import subprocess
 from uuid import uuid4
 
 import pytest
-
 from app.core.config import Settings
 from app.core.exceptions import GenerationTimeoutError, InvalidUploadError
 from app.infrastructure.storage import LocalStorage

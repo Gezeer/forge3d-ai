@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from uuid import UUID
 
 from app.core.config import Settings
 from app.core.exceptions import ArtifactNotFoundError, GenerationError
@@ -49,9 +48,7 @@ class TripoSRService:
             },
         )
 
-    def generate(
-        self, job_context: JobContext, input_image: Path
-    ) -> GenerationResult:
+    def generate(self, job_context: JobContext, input_image: Path) -> GenerationResult:
         job_id = job_context.job_id
         job_dir = job_context.job_dir
         process = self.runner.run(

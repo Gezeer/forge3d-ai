@@ -23,6 +23,16 @@ class QueuedGenerationResponse(BaseModel):
     status_url: str
 
 
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+    request_id: str
+
+
+class ErrorResponse(BaseModel):
+    error: ErrorDetail
+
+
 class JobResponse(BaseModel):
     job_id: UUID
     engine: str
@@ -38,9 +48,7 @@ class JobResponse(BaseModel):
             engine=job.engine,
             status=job.status,
             download_url=(
-                f"/download/{job.id}"
-                if job.status == JobStatus.COMPLETED
-                else None
+                f"/download/{job.id}" if job.status == JobStatus.COMPLETED else None
             ),
             error=job.error,
             metadata=job.metadata,
@@ -54,3 +62,8 @@ class HealthResponse(BaseModel):
     upload_dir: str
     output_dir: str
     engines: Dict[str, Dict[str, Any]]
+    status: str
+    queue: Dict[str, Any]
+    job_repository: Dict[str, Any]
+    storage: Dict[str, Any]
+    version: str

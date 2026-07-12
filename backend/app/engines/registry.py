@@ -19,9 +19,7 @@ class EngineRegistry:
         if not name:
             raise ValueError("Engine name cannot be empty")
         if name in self._engines:
-            raise EngineAlreadyRegisteredError(
-                f"Engine '{name}' já está registrada"
-            )
+            raise EngineAlreadyRegisteredError(f"Engine '{name}' já está registrada")
         self._engines[name] = engine
 
     def get(self, name: str) -> Engine:
@@ -29,9 +27,7 @@ class EngineRegistry:
         try:
             return self._engines[normalized]
         except KeyError as exc:
-            raise EngineNotFoundError(
-                f"Engine '{normalized}' não encontrada"
-            ) from exc
+            raise EngineNotFoundError(f"Engine '{normalized}' não encontrada") from exc
 
     def list(self) -> List[Engine]:
         return list(self._engines.values())

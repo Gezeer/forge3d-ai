@@ -15,8 +15,7 @@ class ProcessResult:
 
 
 class ProcessRunner(Protocol):
-    def run(self, command: Sequence[str], timeout: float) -> ProcessResult:
-        ...
+    def run(self, command: Sequence[str], timeout: float) -> ProcessResult: ...
 
 
 class SubprocessRunner:
