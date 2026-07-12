@@ -1,0 +1,10 @@
+import os import uuid import shutil import subprocess from fastapi import FastAPI, UploadFile, File from 
+fastapi.middleware.cors import CORSMiddleware from fastapi.responses import JSONResponse, FileResponse from 
+services.hunyuan import HunyuanService app = FastAPI(title="Forge3D AI API", version="0.2.0") app.add_middleware(
+    CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"], ) UPLOAD_DIR = 
+"/workspace/forge3d-ai/uploads" OUTPUT_DIR = "/workspace/forge3d-ai/outputs" TRIPOSR_RUN = 
+"/workspace/kai3d/models/TripoSR/run.py" os.makedirs(UPLOAD_DIR, exist_ok=True) os.makedirs(OUTPUT_DIR, exist_ok=True) 
+hunyuan_service = HunyuanService() @app.get("/") def home():
+    return {"name": "Forge3D AI", "status": "running", "version": "0.2.0"} @app.get("/health") def health(): return { 
+        "api": "ok", "triposr_run_exists": os.path.exists(TRIPOSR_RUN),
+        "hunyuan_url": os.getenv("HUNYUAN_URL", "http://127.0.0.1:
