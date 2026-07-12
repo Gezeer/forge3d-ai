@@ -32,23 +32,16 @@ def install_torchvision_compatibility() -> None:
 
     sys.modules[module_name] = compatibility_module
 
-def install_mesh_utils_shim() -> None:
+def install_bpy_compatibility() -> None:
     """
-    O Hunyuan importa convert_obj_to_glb mesmo quando save_glb=False.
+    O Paint usa load_mesh/save_mesh do módulo real mesh_utils.
 
-    Criamos um módulo fake apenas para satisfazer o import.
+    Como save_glb=False, bpy não deve ser utilizado durante esta etapa.
+    Criamos apenas um módulo bpy vazio para permitir o import do mesh_utils real.
     """
 
-    module = types.ModuleType("DifferentiableRenderer.mesh_utils")
-
-    def convert_obj_to_glb(*args, **kwargs):
-        raise RuntimeError(
-            "convert_obj_to_glb() não deveria ser chamado quando save_glb=False"
-        )
-
-    module.convert_obj_to_glb = convert_obj_to_glb
-
-    sys.modules["DifferentiableRenderer.mesh_utils"] = module
+    if "bpy" not in sys.modules:
+        sys.modules["bpy"] = types.ModuleType("bpy")
 
 
 def parse_args() -> argparse.Namespace:
@@ -106,7 +99,7 @@ def parse_args() -> argparse.Namespace:
 
 def build_pipeline(root: Path, resolution: int):
     install_torchvision_compatibility()
-    install_mesh_utils_shim()
+    install_bpy_compatibility()
 
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
