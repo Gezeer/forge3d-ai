@@ -15,6 +15,8 @@ from app.infrastructure.hunyuan_gateway import GradioHunyuanGateway
 from app.infrastructure.job_repository import JsonJobRepository
 from app.infrastructure.storage import LocalStorage
 from app.infrastructure.subprocess_runner import SubprocessRunner
+from app.queue.executor import JobExecutor
+from app.queue.local import LocalJobQueue
 from app.services.hunyuan import HunyuanService
 from app.services.triposr import TripoSRService
 from app.services.upload_validation import UploadValidator
@@ -32,6 +34,13 @@ def build_container(settings: Settings) -> Container:
             GradioHunyuanGateway(settings.hunyuan_url),
         )
     )
+    executor = JobExecutor(jobs, registry)
+    job_queue = LocalJobQueue(
+        executor,
+        jobs,
+        concurrency=settings.queue_concurrency,
+        max_size=settings.queue_max_size,
+    )
     return Container(
         settings=settings,
         storage=storage,
@@ -42,8 +51,10 @@ def build_container(settings: Settings) -> Container:
         engines=registry,
         auto_policy=AutoEnginePolicy(
             registry,
-            fallback=settings.auto_engine,
+            fallback=settings.auto_engine_fallback,
         ),
+        executor=executor,
+        job_queue=job_queue,
     )
 
 
@@ -58,7 +69,11 @@ def create_app(
     async def lifespan(_: FastAPI):
         resolved_container.storage.initialize()
         resolved_container.jobs.initialize()
-        yield
+        resolved_container.job_queue.start()
+        try:
+            yield
+        finally:
+            resolved_container.job_queue.stop()
 
     application = FastAPI(
         title="Forge3D AI API",

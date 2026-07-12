@@ -33,6 +33,10 @@ class Settings:
     environment: str = "development"
     jobs_file: Path = Path("/workspace/forge3d-ai/outputs/jobs.json")
     auto_engine: str = "triposr"
+    queue_concurrency: int = 1
+    queue_max_size: int = 100
+    default_engine: str = "auto"
+    auto_engine_fallback: str = "triposr"
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] = os.environ) -> "Settings":
@@ -84,6 +88,14 @@ class Settings:
                 environ.get("FORGE3D_JOBS_FILE", str(output_dir / "jobs.json"))
             ),
             auto_engine=environ.get("FORGE3D_AUTO_ENGINE", "triposr"),
+            queue_concurrency=int(
+                environ.get("FORGE3D_QUEUE_CONCURRENCY", "1")
+            ),
+            queue_max_size=int(environ.get("FORGE3D_QUEUE_MAX_SIZE", "100")),
+            default_engine=environ.get("FORGE3D_DEFAULT_ENGINE", "auto"),
+            auto_engine_fallback=environ.get(
+                "FORGE3D_AUTO_ENGINE_FALLBACK", "triposr"
+            ),
         )
 
     @property

@@ -2,20 +2,22 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.api.dependencies import Container, get_container
-from app.api.schemas import GenerationResponse, JobResponse
+from app.api.schemas import GenerationResponse, JobResponse, QueuedGenerationResponse
 from app.core.exceptions import (
     Forge3DError,
     EngineRegistryError,
     GenerationError,
     GenerationTimeoutError,
     InvalidUploadError,
+    JobQueueFullError,
     ServiceUnavailableError,
 )
 from app.domain.jobs import Job, JobStatus
 from app.engines.contracts import Engine, JobContext
+from app.queue.contracts import QueuedJob
 
 
 router = APIRouter(tags=["generation"])
@@ -29,6 +31,8 @@ def _http_error(error: Exception, container: Container) -> HTTPException:
     if isinstance(error, ServiceUnavailableError):
         return HTTPException(status_code=503, detail=str(error))
     if isinstance(error, EngineRegistryError):
+        return HTTPException(status_code=503, detail=str(error))
+    if isinstance(error, JobQueueFullError):
         return HTTPException(status_code=503, detail=str(error))
     if isinstance(error, GenerationError):
         detail = str(error)
@@ -44,24 +48,23 @@ def _generate(
     job_id = uuid4()
     job = Job.queued(job_id, engine.name)
     container.jobs.save(job)
-    job_dir = None
     try:
         container.validator.validate_metadata(file.content_type)
         container.validator.validate_size(file.file)
         job_dir = container.storage.create_job_dir(job_id)
         input_image = container.storage.save_upload(job_dir, file.filename, file.file)
-        job = container.jobs.save(job.transition(JobStatus.PROCESSING))
-        result = engine.generate(JobContext(job_id, job_dir), input_image)
-        job = container.jobs.save(
-            job.transition(
-                JobStatus.COMPLETED,
-                artifact_relative_path=result.artifact_relative_path,
-                metadata=result.metadata,
-            )
+        task = QueuedJob(
+            job=job,
+            context=JobContext(job_id, job_dir),
+            image_path=input_image,
         )
+        result = container.executor.execute(task)
     except Exception as error:
-        if job.status in {JobStatus.QUEUED, JobStatus.PROCESSING}:
-            container.jobs.save(job.transition(JobStatus.FAILED, error=str(error)))
+        current = container.jobs.get(job_id)
+        if current is not None and current.status == JobStatus.QUEUED:
+            container.jobs.save(
+                current.transition(JobStatus.FAILED, error=str(error))
+            )
         raise _http_error(error, container) from error
     finally:
         file.file.close()
@@ -72,6 +75,54 @@ def _generate(
         engine=engine.name,
         download_url=f"/download/{job_id}",
         glb_exists=result.artifact_path.suffix.lower() == ".glb",
+    )
+
+
+def _select_engine(requested: str, container: Container) -> Engine:
+    normalized = requested.strip().lower()
+    if normalized == "auto":
+        return container.auto_policy.select()
+    return container.engines.get(normalized)
+
+
+@router.post(
+    "/jobs/generate",
+    response_model=QueuedGenerationResponse,
+    status_code=202,
+)
+def enqueue_generation(
+    file: UploadFile = File(...),
+    engine: str = Form(""),
+    container: Container = Depends(get_container),
+) -> QueuedGenerationResponse:
+    requested = engine or container.settings.default_engine
+    try:
+        selected = _select_engine(requested, container)
+        container.validator.validate_metadata(file.content_type)
+        container.validator.validate_size(file.file)
+        job_id = uuid4()
+        job_dir = container.storage.create_job_dir(job_id)
+        image_path = container.storage.save_upload(
+            job_dir, file.filename, file.file
+        )
+        job = Job.queued(job_id, selected.name)
+        container.job_queue.enqueue(
+            QueuedJob(
+                job=job,
+                context=JobContext(job_id, job_dir),
+                image_path=image_path,
+            )
+        )
+    except Exception as error:
+        raise _http_error(error, container) from error
+    finally:
+        file.file.close()
+
+    return QueuedGenerationResponse(
+        job_id=job_id,
+        engine=selected.name,
+        status=JobStatus.QUEUED,
+        status_url=f"/jobs/{job_id}",
     )
 
 
@@ -106,7 +157,7 @@ def generate_auto(
     container: Container = Depends(get_container),
 ) -> GenerationResponse:
     try:
-        engine = container.auto_policy.select()
+        engine = _select_engine("auto", container)
     except EngineRegistryError as error:
         raise _http_error(error, container) from error
     return _generate(file, engine, container)

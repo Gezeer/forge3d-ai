@@ -1,4 +1,5 @@
 from pathlib import Path
+import time
 from uuid import UUID, uuid4
 
 import pytest
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 from app.api.dependencies import Container
 from app.core.config import Settings
 from app.core.exceptions import GenerationError, GenerationTimeoutError
+from app.core.exceptions import JobQueueFullError
 from app.domain.generation import GenerationResult
 from app.domain.jobs import Job, JobStatus
 from app.engines.contracts import EngineHealth, JobContext
@@ -15,6 +17,8 @@ from app.engines.registry import EngineRegistry
 from app.infrastructure.job_repository import MemoryJobRepository
 from app.infrastructure.storage import LocalStorage
 from app.main import create_app
+from app.queue.executor import JobExecutor
+from app.queue.local import LocalJobQueue
 from app.services.upload_validation import UploadValidator
 
 
@@ -59,7 +63,7 @@ def _client(
     hunyuan=None,
     environment: str = "test",
     max_bytes: int = 1024,
-    auto_engine: str = "triposr",
+    auto_preferred: str = "hunyuan",
 ):
     settings = Settings(
         upload_dir=tmp_path / "uploads",
@@ -67,29 +71,34 @@ def _client(
         jobs_file=tmp_path / "outputs" / "jobs.json",
         environment=environment,
         upload_max_bytes=max_bytes,
-        auto_engine=auto_engine,
+        auto_engine=auto_preferred,
     )
     storage = LocalStorage(settings.upload_dir, settings.output_dir)
     registry = EngineRegistry()
     registry.register(triposr or FakeGenerator("triposr"))
     registry.register(hunyuan or FakeGenerator("hunyuan"))
+    jobs = MemoryJobRepository()
+    executor = JobExecutor(jobs, registry)
+    job_queue = LocalJobQueue(executor, jobs, concurrency=1, max_size=10)
     container = Container(
         settings=settings,
         storage=storage,
-        jobs=MemoryJobRepository(),
+        jobs=jobs,
         validator=UploadValidator(settings.allowed_image_types, max_bytes),
         engines=registry,
         auto_policy=AutoEnginePolicy(
             registry,
-            preferred=auto_engine,
+            preferred=auto_preferred,
             fallback="triposr",
         ),
+        executor=executor,
+        job_queue=job_queue,
     )
     return TestClient(create_app(settings, container)), container
 
 
 @pytest.mark.parametrize(
-    "endpoint", ["/generate/image", "/generate/triposr", "/generate/auto"]
+    "endpoint", ["/generate/image", "/generate/triposr"]
 )
 def test_triposr_routes_generate_track_and_download(
     tmp_path: Path, endpoint: str
@@ -116,7 +125,7 @@ def test_triposr_routes_generate_track_and_download(
 
 
 def test_hunyuan_and_auto_can_use_injected_engine(tmp_path: Path) -> None:
-    client, _ = _client(tmp_path, auto_engine="hunyuan")
+    client, _ = _client(tmp_path, auto_preferred="hunyuan")
 
     with client:
         for endpoint in ("/generate/hunyuan", "/generate/auto"):
@@ -168,7 +177,7 @@ def test_failed_job_and_timeout_are_recorded(tmp_path: Path) -> None:
     assert response.status_code == 504
     failed = next(iter(container.jobs._jobs.values()))
     assert failed.status == JobStatus.FAILED
-    assert failed.error == "tempo limite"
+    assert failed.error == "GenerationTimeoutError: tempo limite"
 
 
 def test_production_response_does_not_expose_stderr(tmp_path: Path) -> None:
@@ -227,3 +236,78 @@ def test_health_does_not_connect_to_remote_services(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert response.json()["api"] == "ok"
     assert response.json()["hunyuan_configured"] is False
+
+
+def test_professional_job_endpoint_returns_202_and_completes(
+    tmp_path: Path,
+) -> None:
+    client, _ = _client(tmp_path)
+
+    with client:
+        response = client.post(
+            "/jobs/generate",
+            data={"engine": "triposr"},
+            files={"file": ("image.png", b"png", "image/png")},
+        )
+        assert response.status_code == 202, response.text
+        body = response.json()
+        assert body["status"] == "queued"
+        assert body["engine"] == "triposr"
+        assert body["status_url"] == f"/jobs/{body['job_id']}"
+
+        deadline = time.monotonic() + 2
+        while True:
+            status = client.get(body["status_url"])
+            assert status.status_code == 200
+            if status.json()["status"] in {"completed", "failed"}:
+                break
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+
+        assert status.json()["status"] == "completed"
+        assert client.get(status.json()["download_url"]).content == b"glb"
+
+
+def test_professional_job_endpoint_normalizes_full_queue(tmp_path: Path) -> None:
+    client, container = _client(tmp_path)
+
+    class FullQueue:
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def enqueue(self, task):
+            raise JobQueueFullError("A fila local está cheia")
+
+    container.job_queue = FullQueue()
+
+    with client:
+        response = client.post(
+            "/jobs/generate",
+            data={"engine": "triposr"},
+            files={"file": ("image.png", b"png", "image/png")},
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "A fila local está cheia"}
+
+
+def test_all_legacy_routes_remain_registered(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    routes = {
+        (route.path, method)
+        for route in client.app.routes
+        for method in (route.methods or set())
+    }
+
+    assert {
+        ("/generate/image", "POST"),
+        ("/generate/triposr", "POST"),
+        ("/generate/hunyuan", "POST"),
+        ("/generate/auto", "POST"),
+        ("/health", "GET"),
+        ("/jobs/{job_id}", "GET"),
+        ("/download/{job_id}", "GET"),
+    } <= routes

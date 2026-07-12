@@ -9,6 +9,8 @@ from app.domain.jobs import JobRepository
 from app.engines.policy import AutoEnginePolicy
 from app.engines.registry import EngineRegistry
 from app.infrastructure.storage import LocalStorage
+from app.queue.contracts import JobQueue
+from app.queue.executor import JobExecutor
 from app.services.upload_validation import UploadValidator
 
 
@@ -20,6 +22,8 @@ class Container:
     validator: UploadValidator
     engines: EngineRegistry
     auto_policy: AutoEnginePolicy
+    executor: JobExecutor
+    job_queue: JobQueue
 
 
 def get_container(request: Request) -> Container:

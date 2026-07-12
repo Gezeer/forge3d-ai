@@ -16,6 +16,13 @@ class GenerationResponse(BaseModel):
     glb_exists: bool
 
 
+class QueuedGenerationResponse(BaseModel):
+    job_id: UUID
+    engine: str
+    status: JobStatus
+    status_url: str
+
+
 class JobResponse(BaseModel):
     job_id: UUID
     engine: str

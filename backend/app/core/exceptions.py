@@ -38,3 +38,11 @@ class EngineNotFoundError(EngineRegistryError):
 
 class EngineUnavailableError(EngineRegistryError):
     pass
+
+
+class JobQueueError(Forge3DError):
+    pass
+
+
+class JobQueueFullError(JobQueueError):
+    pass
