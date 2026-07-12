@@ -9,6 +9,28 @@ from pathlib import Path
 
 LOG = logging.getLogger("forge3d.hunyuan.paint")
 
+def install_torchvision_compatibility() -> None:
+    try:
+        import torchvision.transforms.functional as functional
+    except ImportError:
+        return
+
+    module_name = "torchvision.transforms.functional_tensor"
+
+    if module_name in sys.modules:
+        return
+
+    compatibility_module = types.ModuleType(module_name)
+
+    for name in dir(functional):
+        if not name.startswith("_"):
+            setattr(
+                compatibility_module,
+                name,
+                getattr(functional, name),
+            )
+
+    sys.modules[module_name] = compatibility_module
 
 def install_mesh_utils_shim() -> None:
     """
@@ -83,6 +105,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def build_pipeline(root: Path, resolution: int):
+    install_torchvision_compatibility()
     install_mesh_utils_shim()
 
     if str(root) not in sys.path:
