@@ -31,6 +31,7 @@ def test_signature_uses_published_order_defaults_and_image_type():
         "args": ["", {"$image": "imageeditor"}, 30, None],
         "kwargs": {},
     }
+    assert MODULE.TARGET_ENDPOINT == "/shape_generation"
 
 
 def test_inspector_redacts_signed_urls_tokens_and_paths():

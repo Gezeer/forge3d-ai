@@ -10,7 +10,7 @@ import sys
 from typing import Any, Optional
 from urllib.parse import urlparse
 
-TARGET_ENDPOINT = "/generation_all"
+TARGET_ENDPOINT = "/shape_generation"
 SENSITIVE_KEYS = {"token", "authorization", "cookie", "path", "url"}
 
 

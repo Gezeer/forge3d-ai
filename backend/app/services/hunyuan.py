@@ -98,9 +98,7 @@ class HunyuanService:
         suffix = Path(safe_name).suffix.lower()
         if suffix not in self.supported_artifacts:
             raise ArtifactNotFoundError("Formato de artefato Hunyuan inválido")
-        destination = job_dir / safe_name
-        if destination.exists():
-            destination = job_dir / f"hunyuan_model{suffix}"
+        destination = job_dir / f"model{suffix}"
         if kind == "remote":
             self.downloader(source, destination)
         else:
@@ -110,6 +108,46 @@ class HunyuanService:
         if not destination.is_file() or destination.stat().st_size <= 0:
             raise ArtifactNotFoundError("Artefato Hunyuan vazio ou ausente")
         return destination
+
+    @staticmethod
+    def _mesh_metadata(result: Any, signature: HunyuanSignature) -> dict[str, Any]:
+        metadata: dict[str, Any] = {}
+        stats = (
+            result[2] if isinstance(result, (list, tuple)) and len(result) > 2 else None
+        )
+        aliases = {
+            "number_of_faces": ("number_of_faces", "faces", "num_faces"),
+            "number_of_vertices": (
+                "number_of_vertices",
+                "vertices",
+                "num_vertices",
+            ),
+            "total_time": ("total_time", "generation_time", "time"),
+            "steps": ("steps",),
+            "guidance_scale": ("guidance_scale", "guidance"),
+            "seed": ("seed",),
+            "octree_resolution": ("octree_resolution", "octree"),
+        }
+        if isinstance(stats, dict):
+            for target, sources in aliases.items():
+                for source in sources:
+                    if source in stats and isinstance(stats[source], (int, float, str)):
+                        metadata[target] = stats[source]
+                        break
+        args = signature.args
+        defaults = {
+            "steps": 5,
+            "guidance_scale": 6,
+            "seed": 7,
+            "octree_resolution": 8,
+        }
+        for key, index in defaults.items():
+            if key not in metadata and len(args) > index:
+                metadata[key] = args[index]
+        if isinstance(result, (list, tuple)) and len(result) > 3:
+            if isinstance(result[3], (int, float, str)):
+                metadata["seed"] = result[3]
+        return metadata
 
     def available(self) -> bool:
         return self.signature is not None and self.gateway.available()
@@ -144,6 +182,7 @@ class HunyuanService:
         origin, source, original_name = self._artifact_from_result(raw_result)
         artifact = self._materialize(origin, source, original_name, job_dir)
         duration = time.monotonic() - started
+        safe_mesh_metadata = self._mesh_metadata(raw_result, self.signature)
         return GenerationResult(
             job_id=job_id,
             engine=self.name,
@@ -156,5 +195,6 @@ class HunyuanService:
                 "engine": self.name,
                 "duration_seconds": round(duration, 3),
                 "origin": origin,
+                **safe_mesh_metadata,
             },
         )

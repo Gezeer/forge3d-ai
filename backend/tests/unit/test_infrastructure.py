@@ -1,10 +1,11 @@
+import json
 import subprocess
 from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from app.core.config import Settings
+from app.core.config import HUNYUAN_DEFAULT_SIGNATURE, Settings
 from app.core.exceptions import GenerationTimeoutError, InvalidUploadError
 from app.infrastructure.storage import LocalStorage
 from app.infrastructure.subprocess_runner import SubprocessRunner
@@ -17,6 +18,10 @@ def test_settings_keep_runpod_defaults() -> None:
     assert str(settings.triposr_run) == "/workspace/kai3d/models/TripoSR/run.py"
     assert settings.triposr_device == "cuda:0"
     assert settings.hunyuan_url == "http://127.0.0.1:8080"
+    assert settings.hunyuan_api_name == "/shape_generation"
+    signature = json.loads(HUNYUAN_DEFAULT_SIGNATURE)
+    assert signature["args"][0] == {"$image": "simple"}
+    assert signature["args"][1:5] == [None, None, None, None]
 
 
 def test_settings_can_be_overridden() -> None:

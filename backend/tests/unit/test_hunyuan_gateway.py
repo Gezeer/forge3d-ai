@@ -82,7 +82,7 @@ def test_gateway_builds_published_image_formats(marker, expected) -> None:
             args=[{"$image": marker}, "published-default"],
             kwargs={"optional": None},
         ),
-        "/generation_all",
+        "/shape_generation",
         5,
     )
 
@@ -101,6 +101,6 @@ def test_gateway_rejects_invalid_image_format() -> None:
         gateway.predict(
             Path("image.png"),
             HunyuanSignature(args=[{"$image": "invalid"}]),
-            "/generation_all",
+            "/shape_generation",
             5,
         )

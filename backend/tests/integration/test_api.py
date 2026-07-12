@@ -232,7 +232,7 @@ def test_legacy_download_finds_existing_triposr_artifact(tmp_path: Path) -> None
     assert response.content == b"legacy"
 
 
-def test_health_does_not_connect_to_remote_services(tmp_path: Path) -> None:
+def test_health_reports_default_hunyuan_configuration(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
 
     with client:
@@ -240,7 +240,7 @@ def test_health_does_not_connect_to_remote_services(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert response.json()["api"] == "ok"
-    assert response.json()["hunyuan_configured"] is False
+    assert response.json()["hunyuan_configured"] is True
 
 
 def test_professional_job_endpoint_returns_202_and_completes(
