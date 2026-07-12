@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import shutil
+import time
 from pathlib import Path
 from typing import Any, Iterator, Optional
+from urllib.parse import unquote, urlparse
 
 from app.core.config import Settings
 from app.core.exceptions import ArtifactNotFoundError, ServiceUnavailableError
@@ -14,7 +17,7 @@ from app.infrastructure.storage import LocalStorage
 
 class HunyuanService:
     name = "hunyuan"
-    supported_artifacts = {".glb", ".gltf", ".obj", ".ply", ".stl", ".zip"}
+    supported_artifacts = {".glb", ".obj", ".ply", ".stl"}
 
     def __init__(
         self,
@@ -22,11 +25,13 @@ class HunyuanService:
         storage: LocalStorage,
         gateway: HunyuanGateway,
         signature: Optional[HunyuanSignature] = None,
+        downloader=None,
     ) -> None:
         self.settings = settings
         self.storage = storage
         self.gateway = gateway
         self.signature = signature or self._signature_from_settings()
+        self.downloader = downloader or self._download
 
     def _signature_from_settings(self) -> Optional[HunyuanSignature]:
         if not self.settings.hunyuan_signature_json.strip():
@@ -53,11 +58,16 @@ class HunyuanService:
         else:
             yield value
 
-    def _artifact_from_result(self, result: Any) -> Path:
+    def _artifact_from_result(self, result: Any) -> tuple[str, str, str]:
         for value in self._values(result):
             if isinstance(value, Path):
                 candidate = value
             elif isinstance(value, str):
+                parsed = urlparse(value)
+                if parsed.scheme in {"http", "https"}:
+                    suffix = Path(unquote(parsed.path)).suffix.lower()
+                    if suffix in self.supported_artifacts:
+                        return "remote", value, Path(unquote(parsed.path)).name
                 candidate = Path(value)
             else:
                 continue
@@ -65,10 +75,41 @@ class HunyuanService:
                 candidate.suffix.lower() in self.supported_artifacts
                 and candidate.is_file()
             ):
-                return candidate
+                return "local", str(candidate), candidate.name
         raise ArtifactNotFoundError(
             "O Hunyuan respondeu, mas nenhum artefato 3D local foi encontrado"
         )
+
+    def _download(self, url: str, destination: Path) -> None:
+        import httpx
+
+        with httpx.stream(
+            "GET", url, timeout=self.settings.generation_timeout_seconds
+        ) as response:
+            response.raise_for_status()
+            with destination.open("wb") as target:
+                for chunk in response.iter_bytes():
+                    target.write(chunk)
+
+    def _materialize(
+        self, kind: str, source: str, original_name: str, job_dir: Path
+    ) -> Path:
+        safe_name = self.storage.safe_filename(original_name)
+        suffix = Path(safe_name).suffix.lower()
+        if suffix not in self.supported_artifacts:
+            raise ArtifactNotFoundError("Formato de artefato Hunyuan inválido")
+        destination = job_dir / safe_name
+        if destination.exists():
+            destination = job_dir / f"hunyuan_model{suffix}"
+        if kind == "remote":
+            self.downloader(source, destination)
+        else:
+            local_source = Path(source)
+            if local_source.resolve() != destination.resolve():
+                shutil.copy2(local_source, destination)
+        if not destination.is_file() or destination.stat().st_size <= 0:
+            raise ArtifactNotFoundError("Artefato Hunyuan vazio ou ausente")
+        return destination
 
     def available(self) -> bool:
         return self.signature is not None and self.gateway.available()
@@ -93,22 +134,27 @@ class HunyuanService:
             raise ServiceUnavailableError(
                 "Assinatura Hunyuan não configurada; inspecione a API no RunPod"
             )
+        started = time.monotonic()
         raw_result = self.gateway.predict(
             input_image,
             self.signature,
             self.settings.hunyuan_api_name,
             self.settings.generation_timeout_seconds,
         )
-        source = self._artifact_from_result(raw_result)
-        artifact_dir = job_dir / "hunyuan"
-        artifact_dir.mkdir(parents=True, exist_ok=True)
-        artifact = self.storage.copy_artifact(
-            source, artifact_dir, f"model{source.suffix.lower()}"
-        )
+        origin, source, original_name = self._artifact_from_result(raw_result)
+        artifact = self._materialize(origin, source, original_name, job_dir)
+        duration = time.monotonic() - started
         return GenerationResult(
             job_id=job_id,
             engine=self.name,
             artifact_path=artifact,
-            artifact_relative_path=f"hunyuan/{artifact.name}",
-            metadata={"result_type": type(raw_result).__name__},
+            artifact_relative_path=artifact.name,
+            metadata={
+                "result_type": type(raw_result).__name__,
+                "extension": artifact.suffix.lower(),
+                "size_bytes": artifact.stat().st_size,
+                "engine": self.name,
+                "duration_seconds": round(duration, 3),
+                "origin": origin,
+            },
         )

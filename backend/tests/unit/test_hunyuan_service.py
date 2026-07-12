@@ -59,9 +59,12 @@ def test_hunyuan_normalizes_and_copies_supported_results(
 
     result = service.generate(JobContext(job_id, job_dir), tmp_path / "image.png")
 
-    assert result.artifact_relative_path == "hunyuan/model.glb"
+    assert result.artifact_relative_path == "remote-result.glb"
     assert result.artifact_path.read_bytes() == b"glb"
     assert result.metadata["result_type"] in {"list", "tuple", "dict"}
+    assert result.metadata["extension"] == ".glb"
+    assert result.metadata["size_bytes"] == 3
+    assert result.metadata["origin"] == "local"
 
 
 def test_hunyuan_refuses_to_guess_signature(tmp_path: Path) -> None:
@@ -82,3 +85,34 @@ def test_hunyuan_rejects_unexpected_return(tmp_path: Path) -> None:
 
     with pytest.raises(ArtifactNotFoundError, match="nenhum artefato"):
         service.generate(JobContext(uuid4(), job_dir), tmp_path / "image.png")
+
+
+def test_hunyuan_materializes_filedata_remote_url(tmp_path: Path) -> None:
+    downloaded = []
+
+    def downloader(url, destination):
+        downloaded.append(url)
+        destination.write_bytes(b"remote-glb")
+
+    settings = Settings(upload_dir=tmp_path / "uploads", output_dir=tmp_path)
+    storage = LocalStorage(settings.upload_dir, settings.output_dir)
+    service = HunyuanService(
+        settings,
+        storage,
+        FakeGateway(
+            {"path": None, "url": "https://signed.example/model.glb?token=SECRET"}
+        ),
+        signature=HunyuanSignature(args=[]),
+        downloader=downloader,
+    )
+    job_id = uuid4()
+    job_dir = tmp_path / str(job_id)
+    job_dir.mkdir()
+
+    result = service.generate(JobContext(job_id, job_dir), tmp_path / "image.png")
+
+    assert result.artifact_path == job_dir / "model.glb"
+    assert result.artifact_path.read_bytes() == b"remote-glb"
+    assert result.metadata["origin"] == "remote"
+    assert "url" not in result.metadata
+    assert downloaded == ["https://signed.example/model.glb?token=SECRET"]

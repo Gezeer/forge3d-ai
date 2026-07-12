@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional, Protocol
 from app.core.exceptions import GenerationTimeoutError, ServiceUnavailableError
 
 IMAGE_MARKER = "$image"
+IMAGE_FORMATS = {"simple", "imagedata", "imageeditor"}
 
 
 @dataclass(frozen=True)
@@ -73,8 +74,16 @@ class GradioHunyuanGateway:
 
     def _inject_image(self, value: Any, image_path: Path) -> Any:
         _, file_handler = self._dependencies()
-        if isinstance(value, dict) and value == {IMAGE_MARKER: True}:
-            return file_handler(str(image_path))
+        if isinstance(value, dict) and IMAGE_MARKER in value:
+            image_format = value[IMAGE_MARKER]
+            if image_format is True:
+                image_format = "simple"
+            if image_format not in IMAGE_FORMATS:
+                raise ServiceUnavailableError("Formato de imagem Hunyuan inválido")
+            file_data = file_handler(str(image_path))
+            if image_format in {"simple", "imagedata"}:
+                return file_data
+            return {"background": file_data, "layers": [], "composite": None}
         if isinstance(value, list):
             return [self._inject_image(item, image_path) for item in value]
         if isinstance(value, dict):
