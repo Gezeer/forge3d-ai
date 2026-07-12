@@ -6,6 +6,7 @@ import pytest
 from app.core.config import Settings
 from app.core.exceptions import ArtifactNotFoundError, ServiceUnavailableError
 from app.infrastructure.hunyuan_gateway import HunyuanSignature
+from app.engines.contracts import JobContext
 from app.infrastructure.storage import LocalStorage
 from app.services.hunyuan import HunyuanService
 
@@ -18,6 +19,9 @@ class FakeGateway:
     def predict(self, image_path, signature, api_name, timeout):
         self.call = (image_path, signature, api_name, timeout)
         return self.result
+
+    def available(self) -> bool:
+        return True
 
 
 def _service(tmp_path: Path, result, signature=None) -> HunyuanService:
@@ -54,7 +58,9 @@ def test_hunyuan_normalizes_and_copies_supported_results(
     job_dir = tmp_path / "outputs" / str(job_id)
     job_dir.mkdir(parents=True)
 
-    result = service.generate(job_id, tmp_path / "image.png", job_dir)
+    result = service.generate(
+        JobContext(job_id, job_dir), tmp_path / "image.png"
+    )
 
     assert result.artifact_relative_path == "hunyuan/model.glb"
     assert result.artifact_path.read_bytes() == b"glb"
@@ -65,7 +71,9 @@ def test_hunyuan_refuses_to_guess_signature(tmp_path: Path) -> None:
     service = _service(tmp_path, result=[])
 
     with pytest.raises(ServiceUnavailableError, match="Assinatura"):
-        service.generate(uuid4(), tmp_path / "image.png", tmp_path / "job")
+        service.generate(
+            JobContext(uuid4(), tmp_path / "job"), tmp_path / "image.png"
+        )
 
 
 def test_hunyuan_rejects_unexpected_return(tmp_path: Path) -> None:
@@ -78,4 +86,4 @@ def test_hunyuan_rejects_unexpected_return(tmp_path: Path) -> None:
     job_dir.mkdir()
 
     with pytest.raises(ArtifactNotFoundError, match="nenhum artefato"):
-        service.generate(uuid4(), tmp_path / "image.png", job_dir)
+        service.generate(JobContext(uuid4(), job_dir), tmp_path / "image.png")

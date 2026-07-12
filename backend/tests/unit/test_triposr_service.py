@@ -6,6 +6,7 @@ import pytest
 from app.core.config import Settings
 from app.core.exceptions import ArtifactNotFoundError, GenerationError
 from app.infrastructure.subprocess_runner import ProcessResult
+from app.engines.contracts import JobContext
 from app.services.triposr import TripoSRService
 
 
@@ -43,7 +44,7 @@ def test_triposr_preserves_existing_command_and_artifact_contract(
     runner = FakeRunner(ProcessResult(returncode=0))
     service = TripoSRService(_settings(tmp_path), runner)
 
-    result = service.generate(job_id, input_image, job_dir)
+    result = service.generate(JobContext(job_id, job_dir), input_image)
 
     assert runner.command == [
         "/venvs/triposr/bin/python",
@@ -67,7 +68,7 @@ def test_triposr_reports_process_failure(tmp_path: Path) -> None:
     job_dir = tmp_path / str(uuid4())
 
     with pytest.raises(GenerationError) as error:
-        service.generate(uuid4(), job_dir / "input.png", job_dir)
+        service.generate(JobContext(uuid4(), job_dir), job_dir / "input.png")
 
     assert error.value.details == "private details"
 
@@ -79,4 +80,4 @@ def test_triposr_requires_zero_mesh_glb(tmp_path: Path) -> None:
     job_dir.mkdir()
 
     with pytest.raises(ArtifactNotFoundError, match="mesh.glb"):
-        service.generate(uuid4(), job_dir / "input.png", job_dir)
+        service.generate(JobContext(uuid4(), job_dir), job_dir / "input.png")

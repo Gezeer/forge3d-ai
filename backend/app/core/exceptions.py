@@ -22,3 +22,19 @@ class ServiceUnavailableError(Forge3DError):
 
 class ArtifactNotFoundError(GenerationError):
     pass
+
+
+class EngineRegistryError(Forge3DError):
+    pass
+
+
+class EngineAlreadyRegisteredError(EngineRegistryError):
+    pass
+
+
+class EngineNotFoundError(EngineRegistryError):
+    pass
+
+
+class EngineUnavailableError(EngineRegistryError):
+    pass

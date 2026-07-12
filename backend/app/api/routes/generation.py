@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Protocol
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -9,20 +8,14 @@ from app.api.dependencies import Container, get_container
 from app.api.schemas import GenerationResponse, JobResponse
 from app.core.exceptions import (
     Forge3DError,
+    EngineRegistryError,
     GenerationError,
     GenerationTimeoutError,
     InvalidUploadError,
     ServiceUnavailableError,
 )
-from app.domain.generation import GenerationResult
 from app.domain.jobs import Job, JobStatus
-
-
-class Generator(Protocol):
-    engine: str
-
-    def generate(self, job_id, input_image, job_dir) -> GenerationResult:
-        ...
+from app.engines.contracts import Engine, JobContext
 
 
 router = APIRouter(tags=["generation"])
@@ -35,6 +28,8 @@ def _http_error(error: Exception, container: Container) -> HTTPException:
         return HTTPException(status_code=504, detail=str(error))
     if isinstance(error, ServiceUnavailableError):
         return HTTPException(status_code=503, detail=str(error))
+    if isinstance(error, EngineRegistryError):
+        return HTTPException(status_code=503, detail=str(error))
     if isinstance(error, GenerationError):
         detail = str(error)
         if container.settings.expose_process_details and error.details:
@@ -44,10 +39,10 @@ def _http_error(error: Exception, container: Container) -> HTTPException:
 
 
 def _generate(
-    file: UploadFile, generator: Generator, container: Container
+    file: UploadFile, engine: Engine, container: Container
 ) -> GenerationResponse:
     job_id = uuid4()
-    job = Job.queued(job_id, generator.engine)
+    job = Job.queued(job_id, engine.name)
     container.jobs.save(job)
     job_dir = None
     try:
@@ -56,7 +51,7 @@ def _generate(
         job_dir = container.storage.create_job_dir(job_id)
         input_image = container.storage.save_upload(job_dir, file.filename, file.file)
         job = container.jobs.save(job.transition(JobStatus.PROCESSING))
-        result = generator.generate(job_id, input_image, job_dir)
+        result = engine.generate(JobContext(job_id, job_dir), input_image)
         job = container.jobs.save(
             job.transition(
                 JobStatus.COMPLETED,
@@ -74,7 +69,7 @@ def _generate(
     return GenerationResponse(
         status="success",
         job_id=job_id,
-        engine=generator.engine,
+        engine=engine.name,
         download_url=f"/download/{job_id}",
         glb_exists=result.artifact_path.suffix.lower() == ".glb",
     )
@@ -86,7 +81,7 @@ def generate_image(
     container: Container = Depends(get_container),
 ) -> GenerationResponse:
     """Temporary compatibility alias for TripoSR."""
-    return _generate(file, container.triposr, container)
+    return _generate(file, container.engines.get("triposr"), container)
 
 
 @router.post("/generate/triposr", response_model=GenerationResponse)
@@ -94,7 +89,7 @@ def generate_triposr(
     file: UploadFile = File(...),
     container: Container = Depends(get_container),
 ) -> GenerationResponse:
-    return _generate(file, container.triposr, container)
+    return _generate(file, container.engines.get("triposr"), container)
 
 
 @router.post("/generate/hunyuan", response_model=GenerationResponse)
@@ -102,7 +97,7 @@ def generate_hunyuan(
     file: UploadFile = File(...),
     container: Container = Depends(get_container),
 ) -> GenerationResponse:
-    return _generate(file, container.hunyuan, container)
+    return _generate(file, container.engines.get("hunyuan"), container)
 
 
 @router.post("/generate/auto", response_model=GenerationResponse)
@@ -110,14 +105,11 @@ def generate_auto(
     file: UploadFile = File(...),
     container: Container = Depends(get_container),
 ) -> GenerationResponse:
-    generators = {
-        "triposr": container.triposr,
-        "hunyuan": container.hunyuan,
-    }
-    generator = generators.get(container.settings.auto_engine.lower())
-    if generator is None:
-        raise HTTPException(status_code=503, detail="Motor automático inválido")
-    return _generate(file, generator, container)
+    try:
+        engine = container.auto_policy.select()
+    except EngineRegistryError as error:
+        raise _http_error(error, container) from error
+    return _generate(file, engine, container)
 
 
 @router.get("/jobs/{job_id}", response_model=JobResponse)

@@ -6,9 +6,9 @@ from fastapi import Request
 
 from app.core.config import Settings
 from app.domain.jobs import JobRepository
+from app.engines.policy import AutoEnginePolicy
+from app.engines.registry import EngineRegistry
 from app.infrastructure.storage import LocalStorage
-from app.services.hunyuan import HunyuanService
-from app.services.triposr import TripoSRService
 from app.services.upload_validation import UploadValidator
 
 
@@ -18,8 +18,8 @@ class Container:
     storage: LocalStorage
     jobs: JobRepository
     validator: UploadValidator
-    triposr: TripoSRService
-    hunyuan: HunyuanService
+    engines: EngineRegistry
+    auto_policy: AutoEnginePolicy
 
 
 def get_container(request: Request) -> Container:

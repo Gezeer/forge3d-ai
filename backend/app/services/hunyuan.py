@@ -8,12 +8,13 @@ from uuid import UUID
 from app.core.config import Settings
 from app.core.exceptions import ArtifactNotFoundError, ServiceUnavailableError
 from app.domain.generation import GenerationResult
+from app.engines.contracts import EngineHealth, JobContext
 from app.infrastructure.hunyuan_gateway import HunyuanGateway, HunyuanSignature
 from app.infrastructure.storage import LocalStorage
 
 
 class HunyuanService:
-    engine = "hunyuan"
+    name = "hunyuan"
     supported_artifacts = {".glb", ".gltf", ".obj", ".ply", ".stl", ".zip"}
 
     def __init__(
@@ -70,9 +71,27 @@ class HunyuanService:
             "O Hunyuan respondeu, mas nenhum artefato 3D local foi encontrado"
         )
 
+    def available(self) -> bool:
+        return self.signature is not None and self.gateway.available()
+
+    def health(self) -> EngineHealth:
+        configured = self.signature is not None
+        available = configured and self.gateway.available()
+        return EngineHealth(
+            name=self.name,
+            available=available,
+            details={
+                "configured": configured,
+                "url": self.settings.hunyuan_url,
+                "api_name": self.settings.hunyuan_api_name,
+            },
+        )
+
     def generate(
-        self, job_id: UUID, input_image: Path, job_dir: Path
+        self, job_context: JobContext, input_image: Path
     ) -> GenerationResult:
+        job_id = job_context.job_id
+        job_dir = job_context.job_dir
         if self.signature is None:
             raise ServiceUnavailableError(
                 "Assinatura Hunyuan não configurada; inspecione a API no RunPod"
@@ -91,7 +110,7 @@ class HunyuanService:
         )
         return GenerationResult(
             job_id=job_id,
-            engine=self.engine,
+            engine=self.name,
             artifact_path=artifact,
             artifact_relative_path=f"hunyuan/{artifact.name}",
             metadata={"result_type": type(raw_result).__name__},

@@ -9,6 +9,9 @@ from app.core.config import Settings
 from app.core.exceptions import GenerationError, GenerationTimeoutError
 from app.domain.generation import GenerationResult
 from app.domain.jobs import Job, JobStatus
+from app.engines.contracts import EngineHealth, JobContext
+from app.engines.policy import AutoEnginePolicy
+from app.engines.registry import EngineRegistry
 from app.infrastructure.job_repository import MemoryJobRepository
 from app.infrastructure.storage import LocalStorage
 from app.main import create_app
@@ -17,15 +20,23 @@ from app.services.upload_validation import UploadValidator
 
 class FakeGenerator:
     def __init__(self, engine: str = "triposr", error=None) -> None:
-        self.engine = engine
+        self.name = engine
         self.error = error
         self.input_image = None
 
-    def generate(self, job_id, input_image, job_dir):
+    def available(self):
+        return True
+
+    def health(self):
+        return EngineHealth(self.name, True, {})
+
+    def generate(self, job_context, input_image):
+        job_id = job_context.job_id
+        job_dir = job_context.job_dir
         self.input_image = input_image
         if self.error:
             raise self.error
-        if self.engine == "triposr":
+        if self.name == "triposr":
             artifact = job_dir / "0" / "mesh.glb"
             relative = "0/mesh.glb"
         else:
@@ -35,7 +46,7 @@ class FakeGenerator:
         artifact.write_bytes(b"glb")
         return GenerationResult(
             job_id=job_id,
-            engine=self.engine,
+            engine=self.name,
             artifact_path=artifact,
             artifact_relative_path=relative,
         )
@@ -59,13 +70,20 @@ def _client(
         auto_engine=auto_engine,
     )
     storage = LocalStorage(settings.upload_dir, settings.output_dir)
+    registry = EngineRegistry()
+    registry.register(triposr or FakeGenerator("triposr"))
+    registry.register(hunyuan or FakeGenerator("hunyuan"))
     container = Container(
         settings=settings,
         storage=storage,
         jobs=MemoryJobRepository(),
         validator=UploadValidator(settings.allowed_image_types, max_bytes),
-        triposr=triposr or FakeGenerator("triposr"),
-        hunyuan=hunyuan or FakeGenerator("hunyuan"),
+        engines=registry,
+        auto_policy=AutoEnginePolicy(
+            registry,
+            preferred=auto_engine,
+            fallback="triposr",
+        ),
     )
     return TestClient(create_app(settings, container)), container
 

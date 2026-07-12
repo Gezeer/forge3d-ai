@@ -6,13 +6,14 @@ from uuid import UUID
 from app.core.config import Settings
 from app.core.exceptions import ArtifactNotFoundError, GenerationError
 from app.domain.generation import GenerationResult
+from app.engines.contracts import EngineHealth, JobContext
 from app.infrastructure.subprocess_runner import ProcessRunner
 
 
 class TripoSRService:
     """Runs the existing RunPod TripoSR CLI without loading it in the API process."""
 
-    engine = "triposr"
+    name = "triposr"
 
     def __init__(self, settings: Settings, runner: ProcessRunner) -> None:
         self.settings = settings
@@ -31,9 +32,28 @@ class TripoSRService:
             str(job_dir),
         ]
 
+    def available(self) -> bool:
+        return (
+            self.settings.triposr_python.is_file()
+            and self.settings.triposr_run.is_file()
+        )
+
+    def health(self) -> EngineHealth:
+        return EngineHealth(
+            name=self.name,
+            available=self.available(),
+            details={
+                "run_exists": self.settings.triposr_run.is_file(),
+                "python_exists": self.settings.triposr_python.is_file(),
+                "device": self.settings.triposr_device,
+            },
+        )
+
     def generate(
-        self, job_id: UUID, input_image: Path, job_dir: Path
+        self, job_context: JobContext, input_image: Path
     ) -> GenerationResult:
+        job_id = job_context.job_id
+        job_dir = job_context.job_dir
         process = self.runner.run(
             self.command(input_image, job_dir),
             timeout=self.settings.generation_timeout_seconds,
@@ -53,7 +73,7 @@ class TripoSRService:
 
         return GenerationResult(
             job_id=job_id,
-            engine=self.engine,
+            engine=self.name,
             artifact_path=artifact,
             artifact_relative_path="0/mesh.glb",
             metadata={"return_code": process.returncode},

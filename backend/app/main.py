@@ -9,6 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.dependencies import Container
 from app.api.routes import downloads, generation, health
 from app.core.config import Settings
+from app.engines.policy import AutoEnginePolicy
+from app.engines.registry import EngineRegistry
 from app.infrastructure.hunyuan_gateway import GradioHunyuanGateway
 from app.infrastructure.job_repository import JsonJobRepository
 from app.infrastructure.storage import LocalStorage
@@ -21,6 +23,15 @@ from app.services.upload_validation import UploadValidator
 def build_container(settings: Settings) -> Container:
     storage = LocalStorage(settings.upload_dir, settings.output_dir)
     jobs = JsonJobRepository(settings.jobs_file)
+    registry = EngineRegistry()
+    registry.register(TripoSRService(settings, SubprocessRunner()))
+    registry.register(
+        HunyuanService(
+            settings,
+            storage,
+            GradioHunyuanGateway(settings.hunyuan_url),
+        )
+    )
     return Container(
         settings=settings,
         storage=storage,
@@ -28,11 +39,10 @@ def build_container(settings: Settings) -> Container:
         validator=UploadValidator(
             settings.allowed_image_types, settings.upload_max_bytes
         ),
-        triposr=TripoSRService(settings, SubprocessRunner()),
-        hunyuan=HunyuanService(
-            settings,
-            storage,
-            GradioHunyuanGateway(settings.hunyuan_url),
+        engines=registry,
+        auto_policy=AutoEnginePolicy(
+            registry,
+            fallback=settings.auto_engine,
         ),
     )
 

@@ -15,10 +15,18 @@ def home() -> dict:
 @router.get("/health", response_model=HealthResponse)
 def health(container: Container = Depends(get_container)) -> HealthResponse:
     settings = container.settings
+    engine_health = [engine.health() for engine in container.engines.list()]
     return HealthResponse(
         api="ok",
         triposr_run_exists=settings.triposr_run.exists(),
         hunyuan_configured=bool(settings.hunyuan_signature_json.strip()),
         upload_dir=str(settings.upload_dir),
         output_dir=str(settings.output_dir),
+        engines={
+            item.name: {
+                "available": item.available,
+                "details": item.details,
+            }
+            for item in engine_health
+        },
     )

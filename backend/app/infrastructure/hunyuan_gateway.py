@@ -17,6 +17,9 @@ class HunyuanSignature:
 
 
 class HunyuanGateway(Protocol):
+    def available(self) -> bool:
+        ...
+
     def predict(
         self,
         image_path: Path,
@@ -63,6 +66,13 @@ class GradioHunyuanGateway:
                     "Hunyuan está indisponível na URL configurada"
                 ) from exc
         return self._client
+
+    def available(self) -> bool:
+        try:
+            self._connect()
+            return True
+        except ServiceUnavailableError:
+            return False
 
     def _inject_image(self, value: Any, image_path: Path) -> Any:
         _, file_handler = self._dependencies()

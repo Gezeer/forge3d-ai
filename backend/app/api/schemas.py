@@ -46,3 +46,4 @@ class HealthResponse(BaseModel):
     hunyuan_configured: bool
     upload_dir: str
     output_dir: str
+    engines: Dict[str, Dict[str, Any]]
