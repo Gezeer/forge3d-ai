@@ -43,24 +43,89 @@ backend/scripts/start_runpod.sh
 Todos os caminhos podem ser sobrescritos pelas variáveis documentadas em
 `.env.example`. Os valores padrão mantêm os caminhos atuais do RunPod.
 
-## Descobrir a assinatura real do Hunyuan
+## Validação real no RunPod: quatro terminais
 
-Com a UI Gradio ativa na porta 8080:
+Defina primeiro uma imagem pequena e os caminhos já existentes, sem instalar ou
+alterar modelos.
 
-```bash
-PYTHONPATH=backend python3 backend/scripts/inspect_hunyuan_api.py \
-  --url http://127.0.0.1:8080
-```
+### Terminal 1 — iniciar Hunyuan na porta 8080
 
-Converta a assinatura exibida para JSON, sem mudar a ordem dos argumentos. O
-marcador `{"$image": true}` indica onde o gateway deve inserir o upload:
+O comando de inicialização varia conforme o checkout real do Hunyuan. Informe o
+comando já validado nesse ambiente:
 
 ```bash
-export FORGE3D_HUNYUAN_SIGNATURE_JSON='{"args":[null,{"$image":true}],"kwargs":{}}'
+cd /workspace/forge3d-ai
+export HUNYUAN_ROOT=/workspace/kai3d/models/Hunyuan3D-2.1
+export HUNYUAN_PORT=8080
+export HUNYUAN_START_COMMAND='<comando real do Hunyuan que publica a porta 8080>'
+backend/scripts/start_hunyuan.sh
 ```
 
-O exemplo acima é apenas a sintaxe da configuração, não a assinatura real. A
-integração Hunyuan só pode ser validada após inspeção e geração real no RunPod.
+O script falha se o diretório ou comando estiver ausente e não instala nada.
+
+### Terminal 2 — inspecionar a assinatura publicada
+
+```bash
+cd /workspace/forge3d-ai
+PYTHONPATH=backend python3 backend/scripts/inspect_hunyuan_api.py
+```
+
+O script testa a porta, lista endpoints, exige `/generation_all`, mostra ordem,
+nome, tipo e default, oculta valores sensíveis e imprime o JSON pronto. Copie a
+saída exata, por exemplo sintático:
+
+```bash
+export FORGE3D_HUNYUAN_SIGNATURE_JSON='{"args":[null,{"$image":"imageeditor"},30],"kwargs":{}}'
+```
+
+Esse exemplo não é a assinatura real. Use somente a saída do RunPod. Marcadores
+aceitos: `simple`, `imagedata` e `imageeditor`. Defaults publicados permanecem
+na ordem da API, sem parâmetros posicionais espalhados pelo serviço.
+
+### Terminal 3 — iniciar Forge3D na porta 8000
+
+```bash
+cd /workspace/forge3d-ai
+export FORGE3D_HUNYUAN_URL=http://127.0.0.1:8080
+export FORGE3D_OUTPUT_DIR=/workspace/forge3d-ai/outputs
+export PORT=8000
+backend/scripts/start_forge3d.sh
+```
+
+Verifique portas e PIDs:
+
+```bash
+backend/scripts/check_services.sh
+```
+
+### Terminal 4 — executar testes GPU reais
+
+```bash
+cd /workspace/forge3d-ai
+export FORGE3D_TEST_API_URL=http://127.0.0.1:8000
+export FORGE3D_TEST_IMAGE=/workspace/forge3d-ai/test-image.png
+export FORGE3D_GPU_TEST_TIMEOUT=1200
+backend/scripts/test_gpu.sh
+```
+
+Os testes exigem Hunyuan disponível no health, geração Hunyuan síncrona e em
+fila, polling até conclusão, artefato físico não vazio, extensão 3D reconhecida
+e download. Também confirmam a rota legada TripoSR, GLB e `0/mesh.glb`.
+
+## Troubleshooting Hunyuan/RunPod
+
+- **Porta 8080 indisponível:** execute `check_services.sh`, confira o PID e o
+  log do Terminal 1. O inspetor retorna exit code diferente de zero.
+- **Erro ImageData/ImageEditor:** execute novamente o inspetor e use exatamente
+  o marcador gerado. `ImageEditor` envia `background`, `layers` e `composite`.
+- **Timeout:** aumente `FORGE3D_GENERATION_TIMEOUT_SECONDS` e
+  `FORGE3D_GPU_TEST_TIMEOUT`, verificando antes se o processo ainda usa GPU.
+- **Artefato não encontrado:** confira a saída real de `/generation_all`. São
+  aceitos GLB, OBJ, PLY e STL, como caminho, FileData ou URL HTTP temporária.
+- **Falta de VRAM:** pare processos GPU concorrentes, reduza a concorrência da
+  fila e use as configurações suportadas pelo Hunyuan. Não remova pesos/cache.
+- **URL Gradio assinada:** ela é baixada para `outputs/{job_id}/`; nunca é
+  devolvida ao cliente nem gravada nos metadados públicos.
 
 ## Endpoints
 
