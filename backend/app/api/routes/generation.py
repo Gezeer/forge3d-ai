@@ -113,6 +113,17 @@ def _select_engine(requested: str, container: Container) -> Engine:
         503: {"model": ErrorResponse, "description": "Fila ou engine indisponível"},
     },
 )
+@router.post(
+    "/api/v1/generate",
+    response_model=QueuedGenerationResponse,
+    status_code=202,
+    summary="Enfileirar geração 3D (API v1)",
+    responses={
+        400: {"model": ErrorResponse, "description": "Upload inválido"},
+        422: {"model": ErrorResponse, "description": "Formulário inválido"},
+        503: {"model": ErrorResponse, "description": "Fila ou engine indisponível"},
+    },
+)
 def enqueue_generation(
     file: UploadFile = File(...),
     engine: str = Form(""),

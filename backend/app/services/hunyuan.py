@@ -155,6 +155,7 @@ class HunyuanService:
     def health(self) -> EngineHealth:
         configured = self.signature is not None
         available = configured and self.gateway.available()
+        diagnostics = getattr(self.gateway, "diagnostics", lambda: {})()
         return EngineHealth(
             name=self.name,
             available=available,
@@ -162,6 +163,7 @@ class HunyuanService:
                 "configured": configured,
                 "url": self.settings.hunyuan_url,
                 "api_name": self.settings.hunyuan_api_name,
+                **diagnostics,
             },
         )
 

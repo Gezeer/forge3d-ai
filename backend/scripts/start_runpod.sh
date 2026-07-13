@@ -13,4 +13,9 @@ export FORGE3D_TRIPOSR_DEVICE="${FORGE3D_TRIPOSR_DEVICE:-cuda:0}"
 export FORGE3D_HUNYUAN_URL="${FORGE3D_HUNYUAN_URL:-http://127.0.0.1:8080}"
 
 cd "${ROOT_DIR}/backend"
-exec python3 -m uvicorn main:app --host 0.0.0.0 --port "${PORT:-8000}"
+exec python3 -m uvicorn main:app \
+  --host 0.0.0.0 \
+  --port "${PORT:-8000}" \
+  --proxy-headers \
+  --forwarded-allow-ips "${FORGE3D_FORWARDED_ALLOW_IPS:-*}" \
+  --access-log

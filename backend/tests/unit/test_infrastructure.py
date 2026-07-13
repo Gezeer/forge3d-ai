@@ -19,6 +19,8 @@ def test_settings_keep_runpod_defaults() -> None:
     assert settings.triposr_device == "cuda:0"
     assert settings.hunyuan_url == "http://127.0.0.1:8080"
     assert settings.hunyuan_api_name == "/shape_generation"
+    assert settings.health_timeout_seconds == 10
+    assert "proxy\\.runpod\\.net" in settings.cors_origin_regex
     signature = json.loads(HUNYUAN_DEFAULT_SIGNATURE)
     assert signature["args"][0] == {"$image": "simple"}
     assert signature["args"][1:5] == [None, None, None, None]
@@ -30,6 +32,7 @@ def test_settings_can_be_overridden() -> None:
             "FORGE3D_OUTPUT_DIR": "/tmp/custom-output",
             "FORGE3D_TRIPOSR_DEVICE": "cuda:1",
             "FORGE3D_CORS_ORIGINS": "https://one.test,https://two.test",
+            "FORGE3D_CORS_ORIGIN_REGEX": "^https://pod.test$",
             "FORGE3D_QUEUE_CONCURRENCY": "3",
             "FORGE3D_QUEUE_MAX_SIZE": "25",
             "FORGE3D_DEFAULT_ENGINE": "hunyuan",
@@ -41,6 +44,7 @@ def test_settings_can_be_overridden() -> None:
     assert settings.jobs_file == Path("/tmp/custom-output/jobs.json")
     assert settings.triposr_device == "cuda:1"
     assert settings.cors_origins == ("https://one.test", "https://two.test")
+    assert settings.cors_origin_regex == "^https://pod.test$"
     assert settings.queue_concurrency == 3
     assert settings.queue_max_size == 25
     assert settings.default_engine == "hunyuan"

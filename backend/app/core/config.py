@@ -33,6 +33,7 @@ class Settings:
         "image/webp",
     )
     cors_origins: Tuple[str, ...] = ("http://localhost:3000",)
+    cors_origin_regex: str = r"^https://[a-z0-9-]+-(?:3000|8000)\.proxy\.runpod\.net$"
     environment: str = "development"
     jobs_file: Path = Path("/workspace/forge3d-ai/outputs/jobs.json")
     auto_engine: str = "triposr"
@@ -43,7 +44,7 @@ class Settings:
     log_level: str = "INFO"
     log_format: str = "text"
     metrics_enabled: bool = True
-    health_timeout_seconds: float = 2.0
+    health_timeout_seconds: float = 10.0
     texture_root: Path = Path("/workspace/kai3d/models/Hunyuan3D-2.1")
     forge3d_root: Path = Path("/workspace/forge3d-ai")
     blender_executable: str = "blender"
@@ -97,6 +98,10 @@ class Settings:
             cors_origins=_csv(
                 environ.get("FORGE3D_CORS_ORIGINS", "http://localhost:3000")
             ),
+            cors_origin_regex=environ.get(
+                "FORGE3D_CORS_ORIGIN_REGEX",
+                r"^https://[a-z0-9-]+-(?:3000|8000)\.proxy\.runpod\.net$",
+            ),
             environment=environ.get("FORGE3D_ENV", "development"),
             jobs_file=Path(
                 environ.get("FORGE3D_JOBS_FILE", str(output_dir / "jobs.json"))
@@ -111,7 +116,7 @@ class Settings:
             metrics_enabled=environ.get("FORGE3D_METRICS_ENABLED", "true").lower()
             in {"1", "true", "yes", "on"},
             health_timeout_seconds=float(
-                environ.get("FORGE3D_HEALTH_TIMEOUT_SECONDS", "2")
+                environ.get("FORGE3D_HEALTH_TIMEOUT_SECONDS", "10")
             ),
             texture_root=Path(
                 environ.get(

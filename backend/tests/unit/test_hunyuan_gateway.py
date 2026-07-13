@@ -51,6 +51,10 @@ def test_gateway_handles_unavailable_gradio_port() -> None:
 
     with pytest.raises(ServiceUnavailableError, match="indisponível"):
         gateway.predict(Path("image.png"), HunyuanSignature(), "/api", 5)
+    assert gateway.diagnostics() == {
+        "connection": "not_connected",
+        "error_code": "ConnectionError",
+    }
 
 
 @pytest.mark.parametrize(

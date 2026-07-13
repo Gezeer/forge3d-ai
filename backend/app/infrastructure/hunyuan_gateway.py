@@ -41,6 +41,7 @@ class GradioHunyuanGateway:
         self._client_factory = client_factory
         self._file_handler = file_handler
         self._client = None
+        self.last_error: Optional[str] = None
 
     def _dependencies(self) -> tuple[Callable[[str], Any], Callable[[str], Any]]:
         if self._client_factory is None or self._file_handler is None:
@@ -60,9 +61,11 @@ class GradioHunyuanGateway:
             try:
                 self._client = client_factory(self.url)
             except Exception as exc:
+                self.last_error = type(exc).__name__
                 raise ServiceUnavailableError(
                     "Hunyuan está indisponível na URL configurada"
                 ) from exc
+            self.last_error = None
         return self._client
 
     def available(self) -> bool:
@@ -71,6 +74,12 @@ class GradioHunyuanGateway:
             return True
         except ServiceUnavailableError:
             return False
+
+    def diagnostics(self) -> Dict[str, Any]:
+        return {
+            "connection": "ok" if self._client is not None else "not_connected",
+            "error_code": self.last_error,
+        }
 
     def _inject_image(self, value: Any, image_path: Path) -> Any:
         _, file_handler = self._dependencies()

@@ -313,6 +313,7 @@ def test_all_legacy_routes_remain_registered(tmp_path: Path) -> None:
         ("/generate/triposr", "POST"),
         ("/generate/hunyuan", "POST"),
         ("/generate/auto", "POST"),
+        ("/api/v1/generate", "POST"),
         ("/health", "GET"),
         ("/jobs/{job_id}", "GET"),
         ("/download/{job_id}", "GET"),
