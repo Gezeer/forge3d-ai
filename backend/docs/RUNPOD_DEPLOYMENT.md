@@ -1,0 +1,92 @@
+# Forge3D no proxy HTTP do RunPod
+
+## Diagnóstico do 502
+
+O FastAPI já responde em `127.0.0.1:8000`, no IP da interface do Pod e escuta
+em `0.0.0.0:8000`. Além disso, nenhuma requisição do domínio público aparece no
+access log. Portanto, o 502 é produzido antes do Uvicorn, no mapeamento HTTP do
+Pod. CORS e middleware só podem atuar depois que a requisição chega à aplicação.
+
+No painel RunPod, configure exatamente estes HTTP ports:
+
+```text
+3000
+8000
+8888
+```
+
+Não configure 3000 ou 8000 somente como TCP. Depois de salvar a configuração,
+reinicie o Pod para recriar o registro do proxy. O formato público é:
+
+```text
+https://POD_ID-3000.proxy.runpod.net
+https://POD_ID-8000.proxy.runpod.net
+```
+
+O proxy RunPod termina HTTPS e encaminha HTTP ao Pod. Uvicorn não deve carregar
+certificados TLS próprios.
+
+## Inicialização
+
+O Node.js 22 e as dependências Python devem estar instalados previamente.
+
+```bash
+cd /workspace/forge3d-ai
+export FORGE3D_ROOT=/workspace/forge3d-ai
+export FORGE3D_HUNYUAN_URL=http://127.0.0.1:8080
+export FORGE3D_INTERNAL_API_URL=http://127.0.0.1:8000
+./start.sh
+```
+
+`start.sh` inicia o backend, espera `/health/live` e só então inicia o build
+Next.js em `0.0.0.0:3000`. O navegador usa `/forge3d-api`; a chamada é
+encaminhada pelo servidor Next para `127.0.0.1:8000`. Assim, o navegador nunca
+tenta acessar o próprio localhost e o fluxo normal não depende de CORS.
+
+## Verificação do proxy
+
+```bash
+cd /workspace/forge3d-ai
+export RUNPOD_POD_ID=<id-real-do-pod>
+backend/scripts/diagnose_runpod_proxy.sh
+```
+
+Exit code 3 significa que a aplicação respondeu internamente, mas o mapeamento
+RunPod não alcançou a porta. Nesse caso não existe alteração FastAPI capaz de
+corrigir o salto externo: revise `8000/http`, salve e reinicie o Pod.
+
+Após iniciar:
+
+```bash
+curl --fail http://127.0.0.1:8000/
+curl --fail http://127.0.0.1:8000/health/live
+curl --fail "https://${RUNPOD_POD_ID}-8000.proxy.runpod.net/"
+curl --fail "https://${RUNPOD_POD_ID}-3000.proxy.runpod.net/"
+```
+
+## Hunyuan indisponível no health
+
+Uma resposta HTML em `127.0.0.1:8080/` prova apenas que existe um servidor HTTP.
+O Forge3D precisa que o cliente Gradio carregue a configuração e publique
+`/shape_generation`. O health agora registra `connection` e `error_code` sem
+expor dados sensíveis. O timeout inicial foi elevado para dez segundos:
+
+```bash
+curl -s http://127.0.0.1:8000/health | python3 -m json.tool
+PYTHONPATH=backend python3 backend/scripts/inspect_hunyuan_api.py
+```
+
+Confirme também que o processo Forge3D usa o ambiente que contém
+`gradio_client`. `ImportError` indica dependência ausente; `ConnectionError`
+indica que o cliente não conseguiu carregar a API na URL configurada.
+
+## Endpoints usados pelo frontend
+
+- `POST /api/v1/generate`: cria um job assíncrono;
+- `GET /jobs/{job_id}`: polling;
+- `GET /download/{job_id}`: GLB original;
+- `POST /api/v1/texture`: pipeline de textura;
+- `GET /download/{job_id}/textured`: GLB texturizado.
+
+As operações GPU continuam fora da requisição HTTP. Isso respeita o limite de
+conexão do proxy e evita manter uploads bloqueados durante a inferência.

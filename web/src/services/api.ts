@@ -8,7 +8,7 @@ import {
   TextureJobResponse,
 } from "@/types/api";
 
-const API_URL = (process.env.NEXT_PUBLIC_FORGE3D_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
+const API_URL = (process.env.NEXT_PUBLIC_FORGE3D_API_URL || "/forge3d-api").replace(/\/$/, "");
 const DEFAULT_TIMEOUT = 15_000;
 
 async function request<T>(path: string, init?: RequestInit, timeout = DEFAULT_TIMEOUT): Promise<T> {
@@ -42,7 +42,7 @@ export function createGenerationJob(file: File, engine: Engine): Promise<CreateJ
   const form = new FormData();
   form.append("file", file);
   form.append("engine", engine);
-  return request<CreateJobResponse>("/jobs/generate", { method: "POST", body: form }, 30_000);
+  return request<CreateJobResponse>("/api/v1/generate", { method: "POST", body: form }, 30_000);
 }
 
 export function getJob(jobId: string): Promise<JobResponse> {

@@ -32,6 +32,9 @@ localmente não é esperado; os testes usam injeção e mocks.
 
 ## RunPod
 
+O diagnóstico do proxy, as portas públicas e a inicialização conjunta com o
+Next.js estão em [`backend/docs/RUNPOD_DEPLOYMENT.md`](docs/RUNPOD_DEPLOYMENT.md).
+
 No RunPod, instale a API e o extra leve do cliente Hunyuan, sem reinstalar nem
 alterar os modelos existentes:
 
