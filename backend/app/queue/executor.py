@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Callable, Optional
 
 from app.domain.generation import GenerationResult
 from app.domain.jobs import JobRepository, JobStatus
@@ -13,11 +14,16 @@ logger = logging.getLogger("forge3d.jobs")
 
 class JobExecutor:
     def __init__(
-        self, jobs: JobRepository, engines: EngineRegistry, metrics=None
+        self,
+        jobs: JobRepository,
+        engines: EngineRegistry,
+        metrics=None,
+        on_completed: Optional[Callable[[QueuedJob, GenerationResult], None]] = None,
     ) -> None:
         self.jobs = jobs
         self.engines = engines
         self.metrics = metrics
+        self.on_completed = on_completed
 
     def _log_state(
         self,
@@ -54,7 +60,7 @@ class JobExecutor:
             engine = self.engines.get(job.engine)
             result = engine.generate(task.context, task.image_path)
             duration = time.monotonic() - started
-            self.jobs.save(
+            completed = self.jobs.save(
                 job.transition(
                     JobStatus.COMPLETED,
                     artifact_relative_path=result.artifact_relative_path,
@@ -64,6 +70,21 @@ class JobExecutor:
             self._log_state(task, JobStatus.COMPLETED, duration=duration)
             if self.metrics:
                 self.metrics.observe_job(task.job.engine, "completed", duration)
+            if self.on_completed is not None:
+                try:
+                    self.on_completed(task, result)
+                except Exception as error:
+                    logger.error(
+                        "post_generation_hook_failed job_id=%s engine=%s error_code=%s",
+                        completed.id,
+                        completed.engine,
+                        type(error).__name__,
+                        extra={
+                            "job_id": str(completed.id),
+                            "engine": completed.engine,
+                            "error_code": type(error).__name__,
+                        },
+                    )
             return result
         except Exception as error:
             duration = time.monotonic() - started

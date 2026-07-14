@@ -20,6 +20,27 @@ def reset_scene() -> None:
     bpy.ops.object.delete(use_global=False)
 
 
+def prepare_meshes() -> None:
+    meshes = [item for item in bpy.context.scene.objects if item.type == "MESH"]
+    if not meshes:
+        raise RuntimeError("GLB does not contain a mesh")
+    for item in bpy.context.scene.objects:
+        item.select_set(False)
+    for item in meshes:
+        bpy.context.view_layer.objects.active = item
+        item.select_set(True)
+        if not item.data.materials:
+            material = bpy.data.materials.new(name="Forge3DWhite")
+            material.diffuse_color = (1.0, 1.0, 1.0, 1.0)
+            item.data.materials.append(material)
+        if not item.data.uv_layers:
+            bpy.ops.object.mode_set(mode="EDIT")
+            bpy.ops.mesh.select_all(action="SELECT")
+            bpy.ops.uv.smart_project()
+            bpy.ops.object.mode_set(mode="OBJECT")
+        item.select_set(False)
+
+
 def export_obj(output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     if hasattr(bpy.ops.wm, "obj_export"):
@@ -42,6 +63,7 @@ def main() -> int:
         raise ValueError("Output must use the .obj extension")
     reset_scene()
     bpy.ops.import_scene.gltf(filepath=str(source))
+    prepare_meshes()
     export_obj(output)
     if not output.is_file() or output.stat().st_size <= 0:
         raise RuntimeError("Blender did not generate the OBJ artifact")

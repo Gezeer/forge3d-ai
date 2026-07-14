@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import pytest
 from app.core.config import Settings
-from app.core.exceptions import TexturePipelineError
+from app.core.exceptions import ArtifactNotFoundError, TexturePipelineError
 from app.engines.contracts import JobContext
 from app.infrastructure.subprocess_runner import ProcessResult
 from app.texture.contracts import TextureRequest
@@ -79,6 +79,8 @@ def test_texture_service_runs_blender_paint_blender(tmp_path: Path):
     assert mesh.read_bytes() == b"white"
     assert (context.job_dir / "texture_metadata.json").is_file()
     assert result.metadata["resolution"] == 2048
+    assert (context.job_dir / "texture_work" / "white_mesh.obj").is_file()
+    assert (context.job_dir / "texture_work" / "textured_mesh.obj").is_file()
 
 
 @pytest.mark.parametrize(
@@ -112,3 +114,31 @@ def test_texture_service_builds_commands_without_python_expr(tmp_path: Path):
     assert all("--python-expr" not in command for command, _ in runner.commands)
     assert runner.commands[0][0][:3] == ["blender", "-b", "--python"]
     assert runner.commands[2][0][:3] == ["blender", "-b", "--python"]
+
+
+def test_texture_service_rejects_missing_shape_artifact(tmp_path: Path):
+    runner = PipelineRunner()
+    service = HunyuanTextureService(settings(tmp_path), runner)
+    context, mesh, image = inputs(tmp_path)
+    mesh.unlink()
+
+    with pytest.raises(ArtifactNotFoundError, match="Malha original não encontrada"):
+        service.texture(context, mesh, image, TextureRequest(512, "fast"))
+
+    assert runner.commands == []
+
+
+class TimeoutRunner:
+    def run(self, command, timeout):
+        raise TimeoutError("timeout")
+
+
+def test_texture_service_normalizes_timeout(tmp_path: Path):
+    service = HunyuanTextureService(settings(tmp_path), TimeoutRunner())
+    context, mesh, image = inputs(tmp_path)
+
+    with pytest.raises(TexturePipelineError) as raised:
+        service.texture(context, mesh, image, TextureRequest(512, "fast"))
+
+    assert raised.value.step == "glb_to_obj"
+    assert "timeout" not in str(raised.value).lower()

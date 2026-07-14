@@ -89,6 +89,19 @@ handler recebe antes delas um componente `State` oculto: o cliente o detecta em
 `/config` e insere exatamente um `null` no índice zero. Quando `/config` não
 expõe esse componente, o mesmo `null` inicial é aplicado como fallback seguro.
 
+Jobs assíncronos Hunyuan iniciam automaticamente a texturização após o shape.
+O pipeline usa resolução `512`, qualidade `fast`, preserva o GLB branco e grava
+os intermediários em `outputs/<job_id>/texture_work`. Consulte o job até
+`texture_status=completed` ou `texture_status=failed`; o GLB texturizado fica em
+`GET /download/{job_id}/textured`.
+
+```bash
+export FORGE3D_TEXTURE_ROOT=/workspace/kai3d/models/Hunyuan3D-2.1
+export FORGE3D_TEXTURE_PYTHON=/workspace/kai3d/models/Hunyuan3D-2.1/venv/bin/python
+export FORGE3D_BLENDER_EXECUTABLE=/usr/bin/blender
+export FORGE3D_TEXTURE_TIMEOUT_SECONDS=1800
+```
+
 ### Terminal 3 — iniciar Forge3D na porta 8000
 
 ```bash
@@ -137,10 +150,12 @@ e download. Também confirmam a rota legada TripoSR, GLB e `0/mesh.glb`.
 
 ## Hunyuan Texture/PBR
 
-A textura é um estágio separado e nunca invalida `model.glb`. O endpoint
-`POST /jobs/{job_id}/texture` enfileira o paint; o resultado esperado é
-`outputs/{job_id}/model_textured.glb`. Consulte o estágio em
-`GET /jobs/{job_id}/texture` e baixe por `GET /download/{job_id}/textured`.
+A textura é um estágio separado que inicia automaticamente após um shape
+Hunyuan e nunca invalida `model.glb`. As rotas manuais
+`POST /jobs/{job_id}/texture` e `POST /api/v1/texture` permanecem compatíveis.
+O resultado esperado é `outputs/{job_id}/model_textured.glb`; consulte por
+`GET /jobs/{job_id}` ou `GET /jobs/{job_id}/texture` e baixe por
+`GET /download/{job_id}/textured`.
 
 O checkout local não contém `hy3dpaint/textureGenPipeline.py`, `gradio_app.py`,
 pesos ou requisitos Hunyuan. No RunPod, diagnostique o ambiente real antes de
@@ -201,7 +216,7 @@ Configure o pipeline automático validado:
 export FORGE3D_ROOT=/workspace/forge3d-ai
 export FORGE3D_TEXTURE_ROOT=/workspace/kai3d/models/Hunyuan3D-2.1
 export FORGE3D_TEXTURE_PYTHON=/workspace/kai3d/models/Hunyuan3D-2.1/venv/bin/python
-export FORGE3D_BLENDER_EXECUTABLE=blender
+export FORGE3D_BLENDER_EXECUTABLE=/usr/bin/blender
 export FORGE3D_TEXTURE_TIMEOUT_SECONDS=1800
 ```
 
@@ -213,6 +228,13 @@ de shape já concluído:
 export FORGE3D_TEXTURE_TEST_JOB_ID=<uuid-completed>
 export FORGE3D_TEST_API_URL=http://127.0.0.1:8000
 backend/scripts/test_texture_gpu.sh
+```
+
+Para validar shape e textura automáticos de ponta a ponta:
+
+```bash
+python3 backend/scripts/test_texture_e2e.py \
+  --image /workspace/forge3d-ai/examples/robot.png
 ```
 
 ## Endpoints

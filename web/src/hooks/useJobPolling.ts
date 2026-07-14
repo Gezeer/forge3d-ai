@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getJob } from "@/services/api";
 import { ForgeApiError, JobResponse } from "@/types/api";
 
-const TERMINAL = new Set(["completed", "failed"]);
+const TEXTURE_TERMINAL = new Set(["completed", "failed", "textured", "texture_failed"]);
 
 export function useJobPolling(interval = 2000, timeout = 15 * 60_000) {
   const [job, setJob] = useState<JobResponse | null>(null);
@@ -35,7 +35,10 @@ export function useJobPolling(interval = 2000, timeout = 15 * 60_000) {
         const next = await getJob(jobId);
         if (activeId.current !== jobId) return;
         setJob(next);
-        if (TERMINAL.has(next.status)) stop();
+        const shapeFailed = next.status === "failed";
+        const shapeOnlyCompleted = next.status === "completed" && next.engine !== "hunyuan";
+        const texturedHunyuanCompleted = next.status === "completed" && next.engine === "hunyuan" && TEXTURE_TERMINAL.has(next.texture_status || "");
+        if (shapeFailed || shapeOnlyCompleted || texturedHunyuanCompleted) stop();
         else timer.current = window.setTimeout(poll, interval);
       } catch (cause) {
         setError(cause instanceof ForgeApiError ? cause : new ForgeApiError("Falha ao acompanhar o job."));

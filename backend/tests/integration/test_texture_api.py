@@ -83,10 +83,10 @@ def test_texture_is_queued_completed_and_downloadable(tmp_path: Path):
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:
             status = client.get(f"/jobs/{job.id}").json()
-            if status["texture_status"] == "textured":
+            if status["texture_status"] == "completed":
                 break
         assert status["status"] == "completed"
-        assert status["texture_status"] == "textured"
+        assert status["texture_status"] == "completed"
         assert status["output_textured_glb"].endswith(
             f"outputs/{job.id}/model_textured.glb"
         )
@@ -111,7 +111,7 @@ def test_api_v1_texture_preserves_professional_and_legacy_routes(tmp_path: Path)
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:
             status = client.get(f"/jobs/{job.id}").json()
-            if status["texture_status"] == "textured":
+            if status["texture_status"] == "completed":
                 break
         assert client.get(f"/download/{job.id}/textured").content == b"pbr"
         assert client.get(f"/jobs/{job.id}/texture").status_code == 200
@@ -132,5 +132,33 @@ def test_texture_failure_keeps_original(tmp_path: Path):
         )
     stored = container.jobs.get(job.id)
     assert stored.status == JobStatus.COMPLETED
-    assert stored.texture_status.value == "texture_failed"
+    assert stored.texture_status.value == "failed"
     assert (container.settings.output_dir / str(job.id) / "model.glb").exists()
+
+
+def test_hunyuan_generation_automatically_textures_and_downloads(tmp_path: Path):
+    client, container = _client(tmp_path)
+    container.job_queue.texture_executor = TextureExecutor(
+        container.jobs, FakeTextureService()
+    )
+    with client:
+        response = client.post(
+            "/jobs/generate",
+            data={"engine": "hunyuan"},
+            files={"file": ("robot.png", b"png", "image/png")},
+        )
+        assert response.status_code == 202
+        job_id = response.json()["job_id"]
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            status = client.get(f"/jobs/{job_id}").json()
+            if status.get("texture_status") in {"completed", "failed"}:
+                break
+            time.sleep(0.01)
+
+        assert status["status"] == "completed"
+        assert status["texture_status"] == "completed"
+        assert status["texture_download_url"] == f"/download/{job_id}/textured"
+        assert status["texture_error"] is None
+        assert client.get(f"/download/{job_id}").content == b"glb"
+        assert client.get(f"/download/{job_id}/textured").content == b"pbr"

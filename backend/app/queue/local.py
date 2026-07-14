@@ -6,13 +6,17 @@ import threading
 from typing import List, Optional, Union
 
 from app.core.exceptions import JobQueueFullError
-from app.domain.jobs import JobRepository
+from app.domain.generation import GenerationResult
+from app.domain.jobs import JobRepository, TextureStatus
 from app.queue.contracts import JobQueue, QueuedJob
 from app.queue.executor import JobExecutor
+from app.texture.contracts import TextureRequest
 from app.texture.executor import TextureExecutor, TextureQueuedJob
 
 logger = logging.getLogger("forge3d.queue")
 _STOP = object()
+AUTO_TEXTURE_RESOLUTION = 512
+AUTO_TEXTURE_QUALITY = "fast"
 
 
 class LocalJobQueue(JobQueue):
@@ -39,6 +43,58 @@ class LocalJobQueue(JobQueue):
         self._workers: List[threading.Thread] = []
         self._enqueue_lock = threading.Lock()
         self._started = False
+        self.executor.on_completed = self._enqueue_automatic_texture
+
+    def _enqueue_automatic_texture(
+        self, task: QueuedJob, result: GenerationResult
+    ) -> None:
+        if task.job.engine != "hunyuan" or self.texture_executor is None:
+            return
+        completed = self.jobs.get(task.job.id)
+        if completed is None or completed.texture_status is not None:
+            return
+        texture_task = TextureQueuedJob(
+            completed,
+            task.context,
+            result.artifact_path,
+            task.image_path,
+            TextureRequest(AUTO_TEXTURE_RESOLUTION, AUTO_TEXTURE_QUALITY),
+        )
+        try:
+            running_in_worker = threading.current_thread() in self._workers
+            if running_in_worker:
+                self.texture_executor.execute(texture_task)
+            else:
+                self.enqueue_texture(texture_task)
+            logger.info(
+                "automatic_texture_scheduled job_id=%s engine=hunyuan mode=%s resolution=%s quality=%s",
+                completed.id,
+                "inline_worker" if running_in_worker else "queued",
+                AUTO_TEXTURE_RESOLUTION,
+                AUTO_TEXTURE_QUALITY,
+                extra={
+                    "job_id": str(completed.id),
+                    "engine": "hunyuan",
+                    "resolution": AUTO_TEXTURE_RESOLUTION,
+                    "quality": AUTO_TEXTURE_QUALITY,
+                    "mode": "inline_worker" if running_in_worker else "queued",
+                },
+            )
+        except Exception as error:
+            current = self.jobs.get(completed.id) or completed
+            if current.texture_status is None:
+                self.jobs.save(
+                    current.transition_texture(
+                        TextureStatus.FAILED,
+                        error="Não foi possível iniciar a texturização",
+                        metadata={
+                            "status": "error",
+                            "step": "enqueue",
+                            "error_code": type(error).__name__,
+                        },
+                    )
+                )
+            raise
 
     @property
     def started(self) -> bool:

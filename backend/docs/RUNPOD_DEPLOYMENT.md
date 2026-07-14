@@ -87,6 +87,28 @@ O backend usa HTTP/OpenAPI diretamente e não depende de `gradio_client`.
 `ConnectError` indica que o servidor ainda não aceita conexões; respostas 425,
 429, 502, 503 e 504 são tratadas como inicialização e recebem retry exponencial.
 
+## Shape Hunyuan com textura automática
+
+Depois que um job Hunyuan termina o shape, o mesmo worker enfileira o pipeline
+Blender → Hunyuan Paint → Blender. O GLB branco continua em
+`outputs/<job_id>/model.glb`; os arquivos intermediários ficam isolados em
+`outputs/<job_id>/texture_work`; o resultado final é
+`outputs/<job_id>/model_textured.glb`.
+
+```bash
+export FORGE3D_TEXTURE_ROOT=/workspace/kai3d/models/Hunyuan3D-2.1
+export FORGE3D_TEXTURE_PYTHON=/workspace/kai3d/models/Hunyuan3D-2.1/venv/bin/python
+export FORGE3D_BLENDER_EXECUTABLE=/usr/bin/blender
+export FORGE3D_TEXTURE_TIMEOUT_SECONDS=1800
+python3 backend/scripts/test_texture_e2e.py \
+  --image /workspace/forge3d-ai/examples/robot.png
+```
+
+O teste espera `texture_status=completed`, baixa o GLB branco e o texturizado,
+valida o cabeçalho GLB, executa `file` e rejeita artefatos vazios. Se Blender ou
+Paint falhar, o shape permanece `completed`, o download original continua ativo
+e a textura termina com `texture_status=failed` e erro resumido.
+
 ## Endpoints usados pelo frontend
 
 - `POST /api/v1/generate`: cria um job assíncrono;

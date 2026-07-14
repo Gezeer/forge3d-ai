@@ -17,8 +17,8 @@ class JobStatus(str, Enum):
 class TextureStatus(str, Enum):
     QUEUED = "texture_queued"
     PROCESSING = "texturing"
-    COMPLETED = "textured"
-    FAILED = "texture_failed"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 
 def utc_now() -> str:
@@ -94,7 +94,11 @@ class Job:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> "Job":
         allowed = {
-            None: {TextureStatus.QUEUED},
+            None: {
+                TextureStatus.QUEUED,
+                TextureStatus.PROCESSING,
+                TextureStatus.FAILED,
+            },
             TextureStatus.QUEUED: {TextureStatus.PROCESSING, TextureStatus.FAILED},
             TextureStatus.PROCESSING: {TextureStatus.COMPLETED, TextureStatus.FAILED},
             TextureStatus.COMPLETED: {TextureStatus.QUEUED},
@@ -128,6 +132,11 @@ class Job:
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Job":
+        texture_status = payload.get("texture_status")
+        texture_status = {
+            "textured": TextureStatus.COMPLETED.value,
+            "texture_failed": TextureStatus.FAILED.value,
+        }.get(texture_status, texture_status)
         return cls(
             id=UUID(payload["id"]),
             engine=payload["engine"],
@@ -137,9 +146,7 @@ class Job:
             artifact_relative_path=payload.get("artifact_relative_path"),
             error=payload.get("error"),
             metadata=payload.get("metadata"),
-            texture_status=TextureStatus(payload["texture_status"])
-            if payload.get("texture_status")
-            else None,
+            texture_status=TextureStatus(texture_status) if texture_status else None,
             texture_artifact_relative_path=payload.get(
                 "texture_artifact_relative_path"
             ),

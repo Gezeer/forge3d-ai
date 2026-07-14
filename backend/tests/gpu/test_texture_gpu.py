@@ -26,10 +26,10 @@ def test_real_hunyuan_texture_glb():
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         status = httpx.get(f"{api}/jobs/{job_id}", timeout=30).json()
-        if status.get("texture_status") in {"textured", "texture_failed"}:
+        if status.get("texture_status") in {"completed", "failed"}:
             break
         time.sleep(3)
-    assert status["texture_status"] == "textured"
+    assert status["texture_status"] == "completed"
     artifact = httpx.get(f"{api}/download/{job_id}/textured", timeout=120)
     assert artifact.status_code == 200
     assert len(artifact.content) > 20

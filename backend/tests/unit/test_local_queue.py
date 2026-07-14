@@ -14,6 +14,8 @@ from app.infrastructure.job_repository import MemoryJobRepository
 from app.queue.contracts import QueuedJob
 from app.queue.executor import JobExecutor
 from app.queue.local import LocalJobQueue
+from app.texture.contracts import TextureResult
+from app.texture.executor import TextureExecutor
 
 
 class RecordingEngine:
@@ -80,6 +82,37 @@ def _queue(tmp_path: Path, engine, concurrency=1, max_size=10):
         LocalJobQueue(executor, jobs, concurrency, max_size),
         jobs,
     )
+
+
+class BlockingTextureService:
+    name = "hunyuan"
+
+    def __init__(self, *, fail=False):
+        self.fail = fail
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self.request = None
+
+    def available(self):
+        return True
+
+    def texture(self, context, mesh, image, request):
+        self.request = request
+        self.started.set()
+        self.release.wait(timeout=2)
+        if self.fail:
+            raise RuntimeError("paint failed")
+        output = context.job_dir / "model_textured.glb"
+        output.write_bytes(b"textured")
+        return TextureResult(
+            context.job_id,
+            "completed",
+            mesh,
+            output,
+            "model_textured.glb",
+            "glb",
+            {"size_bytes": output.stat().st_size},
+        )
 
 
 def test_enqueue_and_transitions_to_completed(tmp_path: Path) -> None:
@@ -149,3 +182,54 @@ def test_start_and_stop_are_idempotent_and_clean(tmp_path: Path) -> None:
     queue.stop()
 
     assert queue.workers_alive == 0
+
+
+def test_hunyuan_shape_automatically_transitions_to_texturing_and_completed(
+    tmp_path: Path,
+) -> None:
+    engine = RecordingEngine()
+    engine.name = "hunyuan"
+    queue, jobs = _queue(tmp_path, engine)
+    texture_service = BlockingTextureService()
+    queue.texture_executor = TextureExecutor(jobs, texture_service)
+    task = _task(tmp_path, "hunyuan")
+    queue.start()
+
+    queue.enqueue(task)
+    assert texture_service.started.wait(timeout=2)
+    processing = jobs.get(task.job.id)
+    assert processing.status == JobStatus.COMPLETED
+    assert processing.texture_status.value == "texturing"
+    assert texture_service.request.resolution == 512
+    assert texture_service.request.quality == "fast"
+
+    texture_service.release.set()
+    queue.stop()
+    completed = jobs.get(task.job.id)
+    assert completed.status == JobStatus.COMPLETED
+    assert completed.texture_status.value == "completed"
+    assert completed.output_textured_glb == (
+        f"outputs/{task.job.id}/model_textured.glb"
+    )
+
+
+def test_automatic_texture_failure_does_not_invalidate_hunyuan_shape(
+    tmp_path: Path,
+) -> None:
+    engine = RecordingEngine()
+    engine.name = "hunyuan"
+    queue, jobs = _queue(tmp_path, engine)
+    texture_service = BlockingTextureService(fail=True)
+    texture_service.release.set()
+    queue.texture_executor = TextureExecutor(jobs, texture_service)
+    task = _task(tmp_path, "hunyuan")
+    queue.start()
+
+    queue.enqueue(task)
+    queue.stop()
+
+    failed = jobs.get(task.job.id)
+    assert failed.status == JobStatus.COMPLETED
+    assert failed.artifact_relative_path == "0/mesh.glb"
+    assert failed.texture_status.value == "failed"
+    assert failed.texture_error == "Falha na texturização"

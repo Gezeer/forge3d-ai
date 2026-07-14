@@ -2,7 +2,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from app.domain.jobs import Job, JobStatus
+from app.domain.jobs import Job, JobStatus, TextureStatus
 from app.infrastructure.job_repository import JsonJobRepository
 
 
@@ -29,3 +29,18 @@ def test_json_repository_survives_restart(tmp_path: Path) -> None:
     reloaded.initialize()
 
     assert reloaded.get(job.id) == job
+
+
+@pytest.mark.parametrize(
+    ("legacy", "expected"),
+    [
+        ("textured", TextureStatus.COMPLETED),
+        ("texture_failed", TextureStatus.FAILED),
+    ],
+)
+def test_job_loads_legacy_texture_status(legacy, expected) -> None:
+    job = Job.queued(uuid4(), "hunyuan")
+    payload = job.to_dict()
+    payload["texture_status"] = legacy
+
+    assert Job.from_dict(payload).texture_status == expected

@@ -59,9 +59,13 @@ class HunyuanTextureService:
                 command, timeout=self.settings.texture_timeout_seconds
             )
         except Exception as exc:
+            logger.error("[Texture] Failed step=%s error=%s", step, type(exc).__name__)
             raise TexturePipelineError(step, f"Falha na etapa {step}") from exc
         if result.returncode != 0:
             details = result.stderr if self.settings.expose_process_details else ""
+            logger.error(
+                "[Texture] Failed step=%s returncode=%s", step, result.returncode
+            )
             raise TexturePipelineError(step, f"Falha na etapa {step}", details=details)
         return result
 
@@ -117,6 +121,7 @@ class HunyuanTextureService:
             str(metadata_path),
         ]
         self._run_step("paint", command)
+        logger.info("[Texture] Paint finished")
         return self._require_artifact(output_obj, "paint")
 
     def convert_obj_to_glb(self, obj_path: Path, output_glb: Path) -> Path:
@@ -152,10 +157,14 @@ class HunyuanTextureService:
 
         started = time.monotonic()
         job_dir = job_context.job_dir
-        white_obj = job_dir / "white_mesh.obj"
-        textured_obj = job_dir / "textured_mesh.obj"
+        work_dir = job_dir / "texture_work"
+        if work_dir.exists():
+            shutil.rmtree(work_dir)
+        work_dir.mkdir(parents=True)
+        white_obj = work_dir / "white_mesh.obj"
+        textured_obj = work_dir / "textured_mesh.obj"
         output_glb = job_dir / "model_textured.glb"
-        paint_metadata = job_dir / "paint_metadata.json"
+        paint_metadata = work_dir / "paint_metadata.json"
         metadata_path = job_dir / "texture_metadata.json"
 
         self.convert_glb_to_obj(mesh_path, white_obj)
@@ -167,12 +176,12 @@ class HunyuanTextureService:
         maps = sorted(
             {
                 path.stem.lower()
-                for path in job_dir.rglob("*")
+                for path in work_dir.rglob("*")
                 if path.is_file() and path.stem.lower() in self.pbr_maps
             }
         )
         metadata = {
-            "status": "textured",
+            "status": "completed",
             "engine": self.name,
             "pipeline_version": self.settings.texture_pipeline_version,
             "resolution": request.resolution,
@@ -187,10 +196,15 @@ class HunyuanTextureService:
             json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         temporary_metadata.replace(metadata_path)
-        logger.info("[Texture] Finished")
+        logger.info(
+            "[Texture] Finished job_id=%s size=%s duration=%.3f",
+            job_context.job_id,
+            output_glb.stat().st_size,
+            metadata["duration_seconds"],
+        )
         return TextureResult(
             job_id=job_context.job_id,
-            status="textured",
+            status="completed",
             input_mesh=mesh_path,
             artifact_path=output_glb,
             artifact_relative_path="model_textured.glb",

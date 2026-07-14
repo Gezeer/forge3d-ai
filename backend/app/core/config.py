@@ -43,7 +43,7 @@ class Settings:
     health_timeout_seconds: float = 10.0
     texture_root: Path = Path("/workspace/kai3d/models/Hunyuan3D-2.1")
     forge3d_root: Path = Path("/workspace/forge3d-ai")
-    blender_executable: str = "blender"
+    blender_executable: str = "/usr/bin/blender"
     texture_python: Path = Path("/workspace/kai3d/models/Hunyuan3D-2.1/venv/bin/python")
     texture_command_json: str = ""
     texture_timeout_seconds: float = 1800.0
@@ -123,7 +123,9 @@ class Settings:
                 )
             ),
             forge3d_root=Path(environ.get("FORGE3D_ROOT", "/workspace/forge3d-ai")),
-            blender_executable=environ.get("FORGE3D_BLENDER_EXECUTABLE", "blender"),
+            blender_executable=environ.get(
+                "FORGE3D_BLENDER_EXECUTABLE", "/usr/bin/blender"
+            ),
             texture_python=Path(
                 environ.get(
                     "FORGE3D_TEXTURE_PYTHON",

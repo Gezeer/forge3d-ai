@@ -88,7 +88,7 @@ def _enqueue_texture(
     summary="Executar pipeline completo de textura Hunyuan",
     description=(
         "Enfileira automaticamente GLB para OBJ, Hunyuan Paint e OBJ para GLB. "
-        "Consulte status_url até textured ou texture_failed."
+        "Consulte status_url até completed ou failed."
     ),
     responses={
         404: {"model": ErrorResponse, "description": "Job não encontrado"},
@@ -101,8 +101,8 @@ def create_texture_pipeline(
     job_id: UUID = Form(...),
     file: UploadFile = File(None),
     engine: str = Form("hunyuan"),
-    resolution: int = Form(2048),
-    quality: str = Form("standard"),
+    resolution: int = Form(512),
+    quality: str = Form("fast"),
     container: Container = Depends(get_container),
 ) -> TextureJobResponse:
     return _enqueue_texture(job_id, file, engine, resolution, quality, container)
@@ -118,8 +118,8 @@ def create_texture_job(
     job_id: UUID,
     file: UploadFile = File(None),
     engine: str = Form("hunyuan"),
-    resolution: int = Form(2048),
-    quality: str = Form("standard"),
+    resolution: int = Form(512),
+    quality: str = Form("fast"),
     container: Container = Depends(get_container),
 ) -> TextureJobResponse:
     return _enqueue_texture(job_id, file, engine, resolution, quality, container)
