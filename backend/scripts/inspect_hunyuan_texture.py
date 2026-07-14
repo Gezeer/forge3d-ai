@@ -28,6 +28,10 @@ def main():
     )
     args = parser.parse_args()
     root = Path(args.root)
+    cache_root = Path(
+        os.getenv("FORGE3D_TEXTURE_CACHE", "/workspace/.cache/forge3d-texture")
+    ).expanduser()
+    tmp_dir = Path(os.getenv("TMPDIR", "/tmp")).expanduser()
     files = [
         root / "hy3dpaint/textureGenPipeline.py",
         root / "gradio_app.py",
@@ -90,12 +94,31 @@ def main():
     weights = list(root.glob("**/*paint*")) + list(root.glob("**/*texture*"))
     print(f"texture weights/candidates: {len(weights)}")
     failed |= not weights
-    for name in ("HF_HOME", "TORCH_HOME", "XDG_CACHE_HOME"):
-        value = os.getenv(name)
-        print(f"cache {name}: {'configured' if value else 'default'}")
-    print(
-        "FORGE3D_TEXTURE_COMMAND_JSON must describe the official command after inspection."
-    )
+    expected_cache = {
+        "HF_HOME": cache_root / "cache",
+        "HUGGINGFACE_HUB_CACHE": cache_root / "hub",
+        "TRANSFORMERS_CACHE": cache_root / "transformers",
+        "HF_DATASETS_CACHE": cache_root / "datasets",
+        "XDG_CACHE_HOME": cache_root / "cache",
+        "TORCH_HOME": cache_root / "torch",
+    }
+    print(f"FORGE3D_TEXTURE_CACHE: {cache_root}")
+    for name, expected in expected_cache.items():
+        current = os.getenv(name)
+        state = "configured" if current == str(expected) else "wrapper-managed"
+        print(f"cache {name}: {state} target={expected}")
+    print(f"TMPDIR: {tmp_dir}")
+    try:
+        cache_root.mkdir(parents=True, exist_ok=True)
+        probe = cache_root / ".diagnostic-write-probe"
+        probe.write_bytes(b"forge3d")
+        probe.unlink()
+        free = shutil.disk_usage(cache_root).free
+        print(f"texture cache writable: yes free_bytes={free}")
+    except OSError as error:
+        print(f"texture cache writable: no error={type(error).__name__}")
+        failed = True
+    print("HuggingFace Xet is disabled by the Paint wrapper to avoid quota crashes.")
     return 1 if failed else 0
 
 

@@ -99,7 +99,29 @@ os intermediários em `outputs/<job_id>/texture_work`. Consulte o job até
 export FORGE3D_TEXTURE_ROOT=/workspace/kai3d/models/Hunyuan3D-2.1
 export FORGE3D_TEXTURE_PYTHON=/workspace/kai3d/models/Hunyuan3D-2.1/venv/bin/python
 export FORGE3D_BLENDER_EXECUTABLE=/usr/bin/blender
+export FORGE3D_TEXTURE_CACHE=/workspace/.cache/forge3d-texture
+export TMPDIR=/tmp
 export FORGE3D_TEXTURE_TIMEOUT_SECONDS=1800
+```
+
+O wrapper configura `HF_HOME`, `HUGGINGFACE_HUB_CACHE`, `HF_HUB_CACHE`,
+`TRANSFORMERS_CACHE`, `HF_DATASETS_CACHE`, `XDG_CACHE_HOME`, `TORCH_HOME`,
+`DIFFUSERS_CACHE` e `HF_XET_CACHE` dentro de `FORGE3D_TEXTURE_CACHE` antes do
+primeiro import de Torch, Transformers, Diffusers ou HuggingFace. Ele cria
+automaticamente `cache/`, `hub/`, `transformers/`, `datasets/` e `torch/`.
+`tempfile`, Hub e Diffusers herdam `TMPDIR`.
+
+Downloads interrompidos são repetidos com backoff exponencial no mesmo cache;
+os arquivos `.incomplete` do HuggingFace são preservados e retomados, enquanto
+artefatos completos não são baixados novamente. O backend desativa Xet no
+wrapper para evitar que o downloader Rust volte ao cache com quota de `/root`.
+Antes do primeiro carregamento, são verificadas escrita e disponibilidade de
+3 GiB. Ajustes opcionais:
+
+```bash
+export FORGE3D_TEXTURE_DOWNLOAD_ATTEMPTS=4
+export FORGE3D_TEXTURE_DOWNLOAD_RETRY_SECONDS=2
+export FORGE3D_TEXTURE_MIN_FREE_BYTES=3221225472
 ```
 
 ### Terminal 3 — iniciar Forge3D na porta 8000

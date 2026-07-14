@@ -99,6 +99,8 @@ Blender → Hunyuan Paint → Blender. O GLB branco continua em
 export FORGE3D_TEXTURE_ROOT=/workspace/kai3d/models/Hunyuan3D-2.1
 export FORGE3D_TEXTURE_PYTHON=/workspace/kai3d/models/Hunyuan3D-2.1/venv/bin/python
 export FORGE3D_BLENDER_EXECUTABLE=/usr/bin/blender
+export FORGE3D_TEXTURE_CACHE=/workspace/.cache/forge3d-texture
+export TMPDIR=/tmp
 export FORGE3D_TEXTURE_TIMEOUT_SECONDS=1800
 python3 backend/scripts/test_texture_e2e.py \
   --image /workspace/forge3d-ai/examples/robot.png
@@ -108,6 +110,17 @@ O teste espera `texture_status=completed`, baixa o GLB branco e o texturizado,
 valida o cabeçalho GLB, executa `file` e rejeita artefatos vazios. Se Blender ou
 Paint falhar, o shape permanece `completed`, o download original continua ativo
 e a textura termina com `texture_status=failed` e erro resumido.
+
+O Paint nunca usa `/root/.cache` nem `~/.cache`. Antes de importar as bibliotecas
+de ML, o wrapper direciona todos os caches HuggingFace, Transformers, Diffusers
+e Torch para subdiretórios de `FORGE3D_TEXTURE_CACHE`, configura `tempfile` com
+`TMPDIR` e desativa Xet. Downloads HTTP parciais permanecem no cache para
+retomada automática nos retries exponenciais.
+
+```bash
+mkdir -p /workspace/.cache/forge3d-texture/{cache,hub,transformers,datasets,torch}
+PYTHONPATH=backend python3 backend/scripts/inspect_hunyuan_texture.py
+```
 
 ## Endpoints usados pelo frontend
 

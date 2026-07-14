@@ -20,6 +20,7 @@ def test_settings_keep_runpod_defaults() -> None:
     assert settings.hunyuan_endpoint == "/run/shape_generation"
     assert settings.hunyuan_retry_attempts == 5
     assert settings.health_timeout_seconds == 10
+    assert settings.texture_cache == Path("/workspace/.cache/forge3d-texture")
     assert "proxy\\.runpod\\.net" in settings.cors_origin_regex
 
 
@@ -36,6 +37,7 @@ def test_settings_can_be_overridden() -> None:
             "FORGE3D_HUNYUAN_ENDPOINT": "/run/custom_shape",
             "FORGE3D_HUNYUAN_RETRY_ATTEMPTS": "3",
             "FORGE3D_AUTO_ENGINE_FALLBACK": "triposr",
+            "FORGE3D_TEXTURE_CACHE": "/tmp/custom-texture-cache",
         }
     )
 
@@ -50,6 +52,7 @@ def test_settings_can_be_overridden() -> None:
     assert settings.hunyuan_endpoint == "/run/custom_shape"
     assert settings.hunyuan_retry_attempts == 3
     assert settings.auto_engine_fallback == "triposr"
+    assert settings.texture_cache == Path("/tmp/custom-texture-cache")
 
 
 @pytest.mark.parametrize(

@@ -45,6 +45,7 @@ class Settings:
     forge3d_root: Path = Path("/workspace/forge3d-ai")
     blender_executable: str = "/usr/bin/blender"
     texture_python: Path = Path("/workspace/kai3d/models/Hunyuan3D-2.1/venv/bin/python")
+    texture_cache: Path = Path("/workspace/.cache/forge3d-texture")
     texture_command_json: str = ""
     texture_timeout_seconds: float = 1800.0
     texture_pipeline_version: str = "hunyuan3d-2.1"
@@ -130,6 +131,11 @@ class Settings:
                 environ.get(
                     "FORGE3D_TEXTURE_PYTHON",
                     "/workspace/kai3d/models/Hunyuan3D-2.1/venv/bin/python",
+                )
+            ),
+            texture_cache=Path(
+                environ.get(
+                    "FORGE3D_TEXTURE_CACHE", "/workspace/.cache/forge3d-texture"
                 )
             ),
             texture_command_json=environ.get("FORGE3D_TEXTURE_COMMAND_JSON", ""),

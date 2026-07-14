@@ -74,6 +74,9 @@ def test_texture_service_runs_blender_paint_blender(tmp_path: Path):
         "blender_obj_to_glb.py",
     ]
     assert Path(runner.commands[1][0][1]).name == "run_hunyuan_paint.py"
+    assert runner.commands[1][0][runner.commands[1][0].index("--cache-dir") + 1] == str(
+        service.settings.texture_cache
+    )
     assert result.artifact_path == context.job_dir / "model_textured.glb"
     assert result.artifact_path.read_bytes() == b"artifact"
     assert mesh.read_bytes() == b"white"

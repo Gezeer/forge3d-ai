@@ -23,8 +23,16 @@ export FORGE3D_ROOT=/workspace/forge3d-ai
 export FORGE3D_TEXTURE_ROOT=/workspace/kai3d/models/Hunyuan3D-2.1
 export FORGE3D_TEXTURE_PYTHON=/workspace/kai3d/models/Hunyuan3D-2.1/venv/bin/python
 export FORGE3D_BLENDER_EXECUTABLE=/usr/bin/blender
+export FORGE3D_TEXTURE_CACHE=/workspace/.cache/forge3d-texture
+export TMPDIR=/tmp
 export FORGE3D_TEXTURE_TIMEOUT_SECONDS=1800
 ```
+
+Na primeira execução, o wrapper cria os caches dedicados, confirma escrita e
+espaço livre e carrega o modelo. O HuggingFace reutiliza blobs completos e
+retoma arquivos `.incomplete` após falhas de rede. Xet fica desativado para que
+nenhuma escrita volte ao cache padrão do usuário ou ao downloader nativo que
+produziu o segfault após o erro de quota.
 
 O backend não instala Blender, modelos ou dependências. O comando configurado em
 `FORGE3D_TEXTURE_PYTHON` precisa ser o mesmo ambiente no qual o Hunyuan Paint,

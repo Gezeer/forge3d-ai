@@ -1,13 +1,152 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import logging
+import os
+import shutil
 import sys
+import tempfile
+import time
 import types
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 LOG = logging.getLogger("forge3d.hunyuan.paint")
+DEFAULT_TEXTURE_CACHE = Path("/workspace/.cache/forge3d-texture")
+DEFAULT_MIN_FREE_BYTES = 3 * 1024**3
+DEFAULT_DOWNLOAD_ATTEMPTS = 4
+DEFAULT_RETRY_BASE_SECONDS = 2.0
+
+
+class TextureCacheError(RuntimeError):
+    """Safe cache/download error shown by the wrapper."""
+
+
+@dataclass(frozen=True)
+class CacheLayout:
+    root: Path
+    cache: Path
+    hub: Path
+    transformers: Path
+    datasets: Path
+    torch: Path
+    xet: Path
+    tmp: Path
+
+    @property
+    def ready_marker(self) -> Path:
+        return self.root / ".paint_models_ready"
+
+
+def configure_cache_environment(
+    cache_root: Path | str | None = None,
+    *,
+    environ=None,
+) -> CacheLayout:
+    """Configure every model cache before importing ML dependencies."""
+    environ = os.environ if environ is None else environ
+    root = Path(
+        cache_root or environ.get("FORGE3D_TEXTURE_CACHE") or DEFAULT_TEXTURE_CACHE
+    ).expanduser()
+    root = root.resolve()
+    tmp = Path(environ.get("TMPDIR") or "/tmp").expanduser().resolve()
+    layout = CacheLayout(
+        root=root,
+        cache=root / "cache",
+        hub=root / "hub",
+        transformers=root / "transformers",
+        datasets=root / "datasets",
+        torch=root / "torch",
+        xet=root / "xet",
+        tmp=tmp,
+    )
+    try:
+        for directory in (
+            layout.root,
+            layout.cache,
+            layout.hub,
+            layout.transformers,
+            layout.datasets,
+            layout.torch,
+            layout.xet,
+            layout.tmp,
+        ):
+            directory.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise TextureCacheError(
+            f"Não foi possível preparar o cache de textura: {layout.root}"
+        ) from error
+    environ.update(
+        {
+            "FORGE3D_TEXTURE_CACHE": str(layout.root),
+            "HF_HOME": str(layout.cache),
+            "HUGGINGFACE_HUB_CACHE": str(layout.hub),
+            "HF_HUB_CACHE": str(layout.hub),
+            "TRANSFORMERS_CACHE": str(layout.transformers),
+            "HF_DATASETS_CACHE": str(layout.datasets),
+            "XDG_CACHE_HOME": str(layout.cache),
+            "TORCH_HOME": str(layout.torch),
+            "DIFFUSERS_CACHE": str(layout.hub),
+            "HF_XET_CACHE": str(layout.xet),
+            "HF_HUB_DISABLE_XET": "1",
+            "TMPDIR": str(layout.tmp),
+            "TMP": str(layout.tmp),
+            "TEMP": str(layout.tmp),
+        }
+    )
+    environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "600")
+    environ.setdefault("HF_HUB_ETAG_TIMEOUT", "30")
+    if environ is os.environ:
+        tempfile.tempdir = str(layout.tmp)
+    return layout
+
+
+def log_cache_environment(layout: CacheLayout) -> None:
+    LOG.info("HF_HOME=%s", layout.cache)
+    LOG.info("HUGGINGFACE_HUB_CACHE=%s", layout.hub)
+    LOG.info("TRANSFORMERS_CACHE=%s", layout.transformers)
+    LOG.info("TMPDIR=%s", layout.tmp)
+
+
+def ensure_cache_capacity(
+    layout: CacheLayout,
+    required_bytes: int,
+    *,
+    disk_usage: Callable = shutil.disk_usage,
+) -> None:
+    probe = layout.root / ".write_probe"
+    try:
+        probe.write_bytes(b"forge3d-cache-probe")
+    except OSError as error:
+        raise TextureCacheError(
+            f"Cache de textura sem permissão ou quota disponível: {layout.root}"
+        ) from error
+    finally:
+        probe.unlink(missing_ok=True)
+    if layout.ready_marker.is_file():
+        return
+    free_bytes = disk_usage(layout.root).free
+    if free_bytes < required_bytes:
+        required_gib = required_bytes / 1024**3
+        free_gib = free_bytes / 1024**3
+        raise TextureCacheError(
+            "Espaço insuficiente no cache de textura: "
+            f"necessário={required_gib:.1f}GiB disponível={free_gib:.1f}GiB"
+        )
+
+
+def _is_quota_error(error: BaseException) -> bool:
+    return isinstance(error, OSError) and error.errno in {errno.EDQUOT, errno.ENOSPC}
+
+
+def _is_retryable_download_error(error: BaseException) -> bool:
+    if isinstance(error, (ConnectionError, TimeoutError, OSError)):
+        return True
+    name = type(error).__name__.lower()
+    return any(marker in name for marker in ("connection", "timeout", "httperror"))
 
 
 def install_torchvision_compatibility() -> None:
@@ -94,6 +233,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
     )
 
+    parser.add_argument(
+        "--cache-dir",
+        default=os.getenv("FORGE3D_TEXTURE_CACHE", str(DEFAULT_TEXTURE_CACHE)),
+    )
+
     return parser.parse_args()
 
 
@@ -132,14 +276,81 @@ def build_pipeline(root: Path, resolution: int):
     return Hunyuan3DPaintPipeline(conf)
 
 
+def load_pipeline_with_retry(
+    root: Path,
+    resolution: int,
+    layout: CacheLayout,
+    *,
+    builder: Callable = build_pipeline,
+    sleeper: Callable[[float], None] = time.sleep,
+    environ=None,
+):
+    environ = os.environ if environ is None else environ
+    attempts = max(
+        1,
+        int(
+            environ.get("FORGE3D_TEXTURE_DOWNLOAD_ATTEMPTS", DEFAULT_DOWNLOAD_ATTEMPTS)
+        ),
+    )
+    retry_base = max(
+        0.0,
+        float(
+            environ.get(
+                "FORGE3D_TEXTURE_DOWNLOAD_RETRY_SECONDS",
+                DEFAULT_RETRY_BASE_SECONDS,
+            )
+        ),
+    )
+    required_bytes = max(
+        0,
+        int(
+            environ.get(
+                "FORGE3D_TEXTURE_MIN_FREE_BYTES",
+                DEFAULT_MIN_FREE_BYTES,
+            )
+        ),
+    )
+    ensure_cache_capacity(layout, required_bytes)
+    for attempt in range(attempts):
+        try:
+            pipeline = builder(root, resolution)
+            layout.ready_marker.touch()
+            return pipeline
+        except Exception as error:
+            if _is_quota_error(error):
+                raise TextureCacheError(
+                    "Quota excedida durante o download do Hunyuan Paint. "
+                    f"Cache configurado: {layout.root}"
+                ) from error
+            if not _is_retryable_download_error(error):
+                raise
+            if attempt + 1 >= attempts:
+                raise TextureCacheError(
+                    "Download do Hunyuan Paint interrompido após retries. "
+                    "Os arquivos parciais foram preservados para retomada."
+                ) from error
+            delay = retry_base * (2**attempt)
+            LOG.warning(
+                "Carregamento do Paint interrompido; retomando pelo cache "
+                "attempt=%s/%s delay=%.1fs error=%s",
+                attempt + 1,
+                attempts,
+                delay,
+                type(error).__name__,
+            )
+            sleeper(delay)
+    raise RuntimeError("unreachable")
+
+
 def run_pipeline(
     root: Path,
     mesh: Path,
     image: Path,
     output: Path,
     resolution: int,
+    cache_layout: CacheLayout,
 ):
-    pipeline = build_pipeline(root, resolution)
+    pipeline = load_pipeline_with_retry(root, resolution, cache_layout)
 
     output.parent.mkdir(
         parents=True,
@@ -238,6 +449,8 @@ def main() -> int:
     )
 
     try:
+        cache_layout = configure_cache_environment(args.cache_dir)
+        log_cache_environment(cache_layout)
         validate_inputs(
             root,
             mesh,
@@ -257,6 +470,7 @@ def main() -> int:
             image=image,
             output=output,
             resolution=args.resolution,
+            cache_layout=cache_layout,
         )
 
         result_path = Path(result).expanduser().resolve()

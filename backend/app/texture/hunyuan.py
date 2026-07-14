@@ -117,6 +117,8 @@ class HunyuanTextureService:
             str(request.resolution),
             "--quality",
             request.quality,
+            "--cache-dir",
+            str(self.settings.texture_cache),
             "--metadata",
             str(metadata_path),
         ]
