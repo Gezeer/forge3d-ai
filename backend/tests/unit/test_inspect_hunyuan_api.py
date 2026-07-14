@@ -7,31 +7,38 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
-def test_signature_uses_published_order_defaults_and_image_type():
-    endpoint = {
-        "parameters": [
-            {
-                "parameter_name": "prompt",
-                "parameter_has_default": True,
-                "parameter_default": "",
-            },
-            {"parameter_name": "image", "component": "ImageEditor"},
-            {
-                "parameter_name": "steps",
-                "parameter_has_default": True,
-                "parameter_default": 30,
-            },
-            {"parameter_name": "optional"},
-        ]
+def test_inspector_resolves_openapi_json_properties():
+    openapi = {
+        "paths": {
+            "/run/shape_generation": {
+                "post": {
+                    "requestBody": {
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/Input"}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "components": {
+            "schemas": {
+                "Input": {
+                    "properties": {
+                        "image": {"type": "string"},
+                        "steps": {"type": "integer", "default": 30},
+                    }
+                }
+            }
+        },
     }
 
-    signature = MODULE.build_signature(endpoint)
+    properties = MODULE.request_properties(openapi)
 
-    assert signature == {
-        "args": ["", {"$image": "imageeditor"}, 30, None],
-        "kwargs": {},
-    }
-    assert MODULE.TARGET_ENDPOINT == "/shape_generation"
+    assert properties["image"]["type"] == "string"
+    assert properties["steps"]["default"] == 30
+    assert MODULE.TARGET_ENDPOINT == "/run/shape_generation"
 
 
 def test_inspector_redacts_signed_urls_tokens_and_paths():

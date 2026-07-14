@@ -58,7 +58,7 @@ def test_health_reports_hunyuan_available() -> None:
     hunyuan = response.json()["engines"]["hunyuan"]
     assert hunyuan["configured"] is True
     assert hunyuan["available"] is True
-    assert hunyuan["details"]["api_name"] == "/shape_generation"
+    assert hunyuan["details"]["api_name"] == "/run/shape_generation"
 
 
 def test_live_hunyuan_sync_generation_and_download() -> None:

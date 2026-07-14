@@ -5,11 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Tuple
 
-HUNYUAN_DEFAULT_SIGNATURE = (
-    '{"args":[{"$image":"simple"},null,null,null,null,30,5.0,1234,256,true,'
-    '8000,false],"kwargs":{}}'
-)
-
 
 def _csv(value: str) -> Tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
@@ -23,8 +18,9 @@ class Settings:
     triposr_python: Path = Path("/workspace/kai3d/models/Hunyuan3D-2.1/venv/bin/python")
     triposr_device: str = "cuda:0"
     hunyuan_url: str = "http://127.0.0.1:8080"
-    hunyuan_api_name: str = "/shape_generation"
-    hunyuan_signature_json: str = HUNYUAN_DEFAULT_SIGNATURE
+    hunyuan_endpoint: str = "/run/shape_generation"
+    hunyuan_retry_attempts: int = 5
+    hunyuan_retry_base_seconds: float = 0.5
     generation_timeout_seconds: float = 900.0
     upload_max_bytes: int = 20 * 1024 * 1024
     allowed_image_types: Tuple[str, ...] = (
@@ -77,11 +73,14 @@ class Settings:
             ),
             triposr_device=environ.get("FORGE3D_TRIPOSR_DEVICE", "cuda:0"),
             hunyuan_url=environ.get("FORGE3D_HUNYUAN_URL", "http://127.0.0.1:8080"),
-            hunyuan_api_name=environ.get(
-                "FORGE3D_HUNYUAN_API_NAME", "/shape_generation"
+            hunyuan_endpoint=environ.get(
+                "FORGE3D_HUNYUAN_ENDPOINT", "/run/shape_generation"
             ),
-            hunyuan_signature_json=environ.get(
-                "FORGE3D_HUNYUAN_SIGNATURE_JSON", HUNYUAN_DEFAULT_SIGNATURE
+            hunyuan_retry_attempts=int(
+                environ.get("FORGE3D_HUNYUAN_RETRY_ATTEMPTS", "5")
+            ),
+            hunyuan_retry_base_seconds=float(
+                environ.get("FORGE3D_HUNYUAN_RETRY_BASE_SECONDS", "0.5")
             ),
             generation_timeout_seconds=float(
                 environ.get("FORGE3D_GENERATION_TIMEOUT_SECONDS", "900")

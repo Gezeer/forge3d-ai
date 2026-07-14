@@ -12,7 +12,7 @@ from app.api.routes import downloads, generation, health, metrics, texture
 from app.core.config import Settings
 from app.engines.policy import AutoEnginePolicy
 from app.engines.registry import EngineRegistry
-from app.infrastructure.hunyuan_gateway import GradioHunyuanGateway
+from app.infrastructure.hunyuan_client import HunyuanClient
 from app.infrastructure.job_repository import JsonJobRepository
 from app.infrastructure.storage import LocalStorage
 from app.infrastructure.subprocess_runner import SubprocessRunner
@@ -37,7 +37,12 @@ def build_container(settings: Settings) -> Container:
         HunyuanService(
             settings,
             storage,
-            GradioHunyuanGateway(settings.hunyuan_url),
+            HunyuanClient(
+                settings.hunyuan_url,
+                endpoint=settings.hunyuan_endpoint,
+                retry_attempts=settings.hunyuan_retry_attempts,
+                retry_base_seconds=settings.hunyuan_retry_base_seconds,
+            ),
         )
     )
     metrics_registry = MetricsRegistry(settings.metrics_enabled)

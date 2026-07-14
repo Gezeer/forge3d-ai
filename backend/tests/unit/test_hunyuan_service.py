@@ -3,9 +3,9 @@ from uuid import uuid4
 
 import pytest
 from app.core.config import Settings
-from app.core.exceptions import ArtifactNotFoundError, ServiceUnavailableError
+from app.core.exceptions import ArtifactNotFoundError
 from app.engines.contracts import JobContext
-from app.infrastructure.hunyuan_gateway import HunyuanSignature
+from app.infrastructure.hunyuan_client import HunyuanResult
 from app.infrastructure.storage import LocalStorage
 from app.services.hunyuan import HunyuanService
 
@@ -15,27 +15,36 @@ class FakeGateway:
         self.result = result
         self.call = None
 
-    def predict(self, image_path, signature, api_name, timeout):
-        self.call = (image_path, signature, api_name, timeout)
-        return self.result
+    def generate(self, image_path, timeout):
+        self.call = (image_path, timeout)
+        return HunyuanResult(
+            self.result,
+            {
+                "steps": 30,
+                "guidance_scale": 5.0,
+                "seed": 1234,
+                "octree_resolution": 256,
+            },
+        )
 
-    def available(self) -> bool:
+    def available(self, timeout) -> bool:
         return True
 
+    def diagnostics(self):
+        return {"openapi": "available", "endpoint": "/run/shape_generation"}
 
-def _service(tmp_path: Path, result, signature=None) -> HunyuanService:
+
+def _service(tmp_path: Path, result) -> HunyuanService:
     settings = Settings(
         upload_dir=tmp_path / "uploads",
         output_dir=tmp_path / "outputs",
         generation_timeout_seconds=12,
-        hunyuan_signature_json="",
     )
     storage = LocalStorage(settings.upload_dir, settings.output_dir)
     return HunyuanService(
         settings,
         storage,
         FakeGateway(result),
-        signature=signature,
     )
 
 
@@ -52,8 +61,7 @@ def test_hunyuan_normalizes_and_copies_supported_results(
 ) -> None:
     source = tmp_path / "remote-result.glb"
     source.write_bytes(b"glb")
-    signature = HunyuanSignature(args=[{"$image": True}])
-    service = _service(tmp_path, wrapped(source), signature)
+    service = _service(tmp_path, wrapped(source))
     job_id = uuid4()
     job_dir = tmp_path / "outputs" / str(job_id)
     job_dir.mkdir(parents=True)
@@ -68,18 +76,20 @@ def test_hunyuan_normalizes_and_copies_supported_results(
     assert result.metadata["origin"] == "local"
 
 
-def test_hunyuan_refuses_to_guess_signature(tmp_path: Path) -> None:
-    service = _service(tmp_path, result=[])
+def test_hunyuan_health_uses_openapi_client(tmp_path: Path) -> None:
+    service = _service(tmp_path, [])
 
-    with pytest.raises(ServiceUnavailableError, match="Assinatura"):
-        service.generate(JobContext(uuid4(), tmp_path / "job"), tmp_path / "image.png")
+    health = service.health()
+
+    assert health.available is True
+    assert health.details["api_name"] == "/run/shape_generation"
+    assert health.details["openapi"] == "available"
 
 
 def test_hunyuan_rejects_unexpected_return(tmp_path: Path) -> None:
     service = _service(
         tmp_path,
         result={"status": "done", "preview": "not-an-artifact"},
-        signature=HunyuanSignature(args=[]),
     )
     job_dir = tmp_path / "job"
     job_dir.mkdir()
@@ -103,7 +113,6 @@ def test_hunyuan_materializes_filedata_remote_url(tmp_path: Path) -> None:
         FakeGateway(
             {"path": None, "url": "https://signed.example/model.glb?token=SECRET"}
         ),
-        signature=HunyuanSignature(args=[]),
         downloader=downloader,
     )
     job_id = uuid4()
@@ -134,23 +143,7 @@ def test_hunyuan_normalizes_real_shape_generation_tuple_and_mesh_stats(
         },
         4321,
     )
-    signature = HunyuanSignature(
-        args=[
-            {"$image": "simple"},
-            None,
-            None,
-            None,
-            None,
-            30,
-            5.0,
-            1234,
-            256,
-            True,
-            8000,
-            False,
-        ]
-    )
-    service = _service(tmp_path, real_result, signature)
+    service = _service(tmp_path, real_result)
     job_id = uuid4()
     job_dir = tmp_path / "outputs" / str(job_id)
     job_dir.mkdir(parents=True)
@@ -174,7 +167,6 @@ def test_hunyuan_update_value_must_exist(tmp_path: Path) -> None:
     service = _service(
         tmp_path,
         ({"value": "/tmp/missing/white_mesh.glb", "**type**": "update"},),
-        HunyuanSignature(args=[]),
     )
     job_dir = tmp_path / "job"
     job_dir.mkdir()
@@ -189,7 +181,6 @@ def test_hunyuan_update_value_rejects_unsupported_extension(tmp_path: Path) -> N
     service = _service(
         tmp_path,
         ({"value": str(source), "**type**": "update"},),
-        HunyuanSignature(args=[]),
     )
     job_dir = tmp_path / "job"
     job_dir.mkdir()

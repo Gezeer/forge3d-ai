@@ -67,18 +67,18 @@ curl --fail "https://${RUNPOD_POD_ID}-3000.proxy.runpod.net/"
 ## Hunyuan indisponível no health
 
 Uma resposta HTML em `127.0.0.1:8080/` prova apenas que existe um servidor HTTP.
-O Forge3D precisa que o cliente Gradio carregue a configuração e publique
-`/shape_generation`. O health agora registra `connection` e `error_code` sem
-expor dados sensíveis. O timeout inicial foi elevado para dez segundos:
+O Forge3D exige `/gradio_api/openapi.json` com `POST /run/shape_generation`.
+O health registra disponibilidade do OpenAPI, endpoint e código de erro sem
+expor dados sensíveis:
 
 ```bash
 curl -s http://127.0.0.1:8000/health | python3 -m json.tool
 PYTHONPATH=backend python3 backend/scripts/inspect_hunyuan_api.py
 ```
 
-Confirme também que o processo Forge3D usa o ambiente que contém
-`gradio_client`. `ImportError` indica dependência ausente; `ConnectionError`
-indica que o cliente não conseguiu carregar a API na URL configurada.
+O backend usa HTTP/OpenAPI diretamente e não depende de `gradio_client`.
+`ConnectError` indica que o servidor ainda não aceita conexões; respostas 425,
+429, 502, 503 e 504 são tratadas como inicialização e recebem retry exponencial.
 
 ## Endpoints usados pelo frontend
 

@@ -1,7 +1,7 @@
 # Forge3D AI backend
 
 Backend FastAPI modular para geração 3D. O TripoSR preserva o contrato legado
-do RunPod e o Hunyuan fica isolado atrás de um gateway Gradio configurável.
+do RunPod e o Hunyuan fica isolado atrás de um cliente HTTP/OpenAPI configurável.
 
 ## Garantias desta fase
 
@@ -12,7 +12,7 @@ do RunPod e o Hunyuan fica isolado atrás de um gateway Gradio configurável.
 - Jobs usam os estados `queued`, `processing`, `completed` e `failed`.
 - O repositório JSON implementa uma interface substituível futuramente por
   PostgreSQL.
-- O Hunyuan não presume a assinatura da UI Gradio.
+- O Hunyuan descobre o contrato JSON pelo OpenAPI do Gradio 5.
 - Engines implementam um contrato comum e são resolvidas por `EngineRegistry`.
 - A fila local implementa `JobQueue`, que pode ganhar outro adaptador no futuro.
 - Workers locais só são iniciados e encerrados pelo lifespan do FastAPI.
@@ -35,8 +35,7 @@ localmente não é esperado; os testes usam injeção e mocks.
 O diagnóstico do proxy, as portas públicas e a inicialização conjunta com o
 Next.js estão em [`backend/docs/RUNPOD_DEPLOYMENT.md`](docs/RUNPOD_DEPLOYMENT.md).
 
-No RunPod, instale a API e o extra leve do cliente Hunyuan, sem reinstalar nem
-alterar os modelos existentes:
+No RunPod, instale a API sem reinstalar nem alterar os modelos existentes:
 
 ```bash
 python3 -m pip install -e '.[hunyuan]'
@@ -66,26 +65,25 @@ backend/scripts/start_hunyuan.sh
 
 O script falha se o diretório ou comando estiver ausente e não instala nada.
 
-### Terminal 2 — inspecionar a assinatura publicada
+### Terminal 2 — inspecionar o OpenAPI publicado
 
 ```bash
 cd /workspace/forge3d-ai
 PYTHONPATH=backend python3 backend/scripts/inspect_hunyuan_api.py
 ```
 
-O script testa a porta, lista endpoints, exige `/shape_generation`, mostra ordem,
-nome, tipo e default, oculta valores sensíveis e imprime o JSON pronto. Copie a
-saída exata, por exemplo sintático:
+O script testa a porta, lê `/gradio_api/openapi.json`, exige
+`POST /run/shape_generation` e mostra nomes, tipos e defaults do JSON publicado.
+O cliente do backend usa esse mesmo documento dinamicamente.
 
 ```bash
-export FORGE3D_HUNYUAN_API_NAME=/shape_generation
-export FORGE3D_HUNYUAN_SIGNATURE_JSON='{"args":[{"$image":"simple"},null,null,null,null,30,5.0,1234,256,true,8000,false],"kwargs":{}}'
+export FORGE3D_HUNYUAN_ENDPOINT=/run/shape_generation
+export FORGE3D_HUNYUAN_RETRY_ATTEMPTS=5
+export FORGE3D_HUNYUAN_RETRY_BASE_SECONDS=0.5
 ```
 
-Essa assinatura foi confirmada no RunPod para `/shape_generation`. Somente o
-primeiro argumento recebe a imagem; os quatro campos multiview permanecem
-`null`. Marcadores aceitos pelo gateway continuam sendo `simple`, `imagedata` e
-`imageeditor` para compatibilidade com outras APIs publicadas.
+Não existe configuração posicional nem assinatura JSON. A imagem e os parâmetros
+são enviados por nome no `requestBody` JSON descrito pelo OpenAPI do Gradio 5.
 
 ### Terminal 3 — iniciar Forge3D na porta 8000
 
@@ -121,11 +119,11 @@ e download. Também confirmam a rota legada TripoSR, GLB e `0/mesh.glb`.
 
 - **Porta 8080 indisponível:** execute `check_services.sh`, confira o PID e o
   log do Terminal 1. O inspetor retorna exit code diferente de zero.
-- **Erro ImageData/ImageEditor:** execute novamente o inspetor e use exatamente
-  o marcador gerado. `ImageEditor` envia `background`, `layers` e `composite`.
+- **Erro ImageData/ImageEditor:** execute novamente o inspetor. O cliente adapta
+  automaticamente `string`, `FileData` ou `ImageEditor` conforme o schema.
 - **Timeout:** aumente `FORGE3D_GENERATION_TIMEOUT_SECONDS` e
   `FORGE3D_GPU_TEST_TIMEOUT`, verificando antes se o processo ainda usa GPU.
-- **Artefato não encontrado:** confira a saída real de `/shape_generation`. São
+- **Artefato não encontrado:** confira a saída real de `/run/shape_generation`. São
   aceitos GLB, OBJ, PLY e STL, como caminho, FileData ou URL HTTP temporária.
 - **Falta de VRAM:** pare processos GPU concorrentes, reduza a concorrência da
   fila e use as configurações suportadas pelo Hunyuan. Não remova pesos/cache.

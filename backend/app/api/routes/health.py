@@ -66,7 +66,7 @@ def _snapshot(container: Container) -> HealthResponse:
     return HealthResponse(
         api="ok",
         triposr_run_exists=settings.triposr_run.exists(),
-        hunyuan_configured=bool(settings.hunyuan_signature_json.strip()),
+        hunyuan_configured=bool(settings.hunyuan_endpoint),
         upload_dir=str(settings.upload_dir),
         output_dir=str(settings.output_dir),
         engines=engines,

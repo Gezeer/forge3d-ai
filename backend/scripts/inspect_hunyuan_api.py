@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect the live Hunyuan Gradio API without exposing sensitive values."""
+"""Inspect the live Gradio 5 OpenAPI used by Hunyuan Shape."""
 
 from __future__ import annotations
 
@@ -7,10 +7,13 @@ import argparse
 import json
 import socket
 import sys
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
 
-TARGET_ENDPOINT = "/shape_generation"
+import httpx
+
+OPENAPI_PATH = "/gradio_api/openapi.json"
+TARGET_ENDPOINT = "/run/shape_generation"
 SENSITIVE_KEYS = {"token", "authorization", "cookie", "path", "url"}
 
 
@@ -21,7 +24,7 @@ def redact(value: Any, key: str = "") -> Any:
         return {item: redact(content, item) for item, content in value.items()}
     if isinstance(value, list):
         return [redact(item) for item in value]
-    if isinstance(value, str) and ("token=" in value.lower() or value.startswith("/")):
+    if isinstance(value, str) and "token=" in value.lower():
         return "[redacted]"
     return value
 
@@ -35,78 +38,48 @@ def check_port(url: str, timeout: float) -> None:
         pass
 
 
-def endpoint_map(api_info: Any) -> dict[str, Any]:
-    if not isinstance(api_info, dict):
-        return {}
-    for key in ("named_endpoints", "endpoints"):
-        endpoints = api_info.get(key)
-        if isinstance(endpoints, dict):
-            return endpoints
-    return {key: value for key, value in api_info.items() if str(key).startswith("/")}
+def resolve_schema(schema: dict[str, Any], openapi: dict[str, Any]) -> dict[str, Any]:
+    while "$ref" in schema:
+        target: Any = openapi
+        for part in schema["$ref"][2:].split("/"):
+            target = target[part]
+        schema = target
+    return schema
 
 
-def image_marker(parameter: dict[str, Any]) -> Optional[dict[str, str]]:
-    component = str(
-        parameter.get("component")
-        or parameter.get("component_type")
-        or parameter.get("type", "")
-    ).lower()
-    if "imageeditor" in component or "image_editor" in component:
-        return {"$image": "imageeditor"}
-    if "imagedata" in component:
-        return {"$image": "imagedata"}
-    if "image" in component:
-        return {"$image": "simple"}
-    return None
-
-
-def build_signature(endpoint: dict[str, Any]) -> dict[str, Any]:
-    parameters = endpoint.get("parameters", [])
-    if not isinstance(parameters, list):
-        raise ValueError("Endpoint sem lista de parâmetros")
-    args = []
-    for parameter in parameters:
-        marker = image_marker(parameter)
-        if marker:
-            args.append(marker)
-        elif parameter.get("parameter_has_default") or "default" in parameter:
-            args.append(parameter.get("parameter_default", parameter.get("default")))
-        else:
-            args.append(None)
-    return {"args": args, "kwargs": {}}
+def request_properties(openapi: dict[str, Any]) -> dict[str, Any]:
+    operation = openapi["paths"][TARGET_ENDPOINT]["post"]
+    schema = operation["requestBody"]["content"]["application/json"]["schema"]
+    return resolve_schema(schema, openapi).get("properties", {})
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://127.0.0.1:8080")
-    parser.add_argument("--timeout", type=float, default=5.0)
+    parser.add_argument("--timeout", type=float, default=10.0)
     args = parser.parse_args()
     try:
         check_port(args.url, args.timeout)
-        from gradio_client import Client
-
-        client = Client(args.url)
-        api_info = client.view_api(
-            all_endpoints=True, print_info=False, return_format="dict"
+        response = httpx.get(
+            f"{args.url.rstrip('/')}{OPENAPI_PATH}", timeout=args.timeout
         )
-        endpoints = endpoint_map(api_info)
-        print("Endpoints disponíveis:")
-        for name in sorted(endpoints):
-            print(f"- {name}")
-        endpoint = endpoints.get(TARGET_ENDPOINT)
-        if endpoint is None:
+        response.raise_for_status()
+        openapi = response.json()
+        paths = openapi.get("paths", {})
+        print("Endpoints POST disponíveis:")
+        for name, methods in sorted(paths.items()):
+            if "post" in methods:
+                print(f"- {name}")
+        if TARGET_ENDPOINT not in paths or "post" not in paths[TARGET_ENDPOINT]:
             raise RuntimeError(f"Endpoint {TARGET_ENDPOINT} não encontrado")
-        print(f"\nParâmetros de {TARGET_ENDPOINT}:")
-        for index, parameter in enumerate(endpoint.get("parameters", [])):
-            safe = redact(parameter)
+        print(f"\nJSON publicado por {TARGET_ENDPOINT}:")
+        for name, raw_schema in request_properties(openapi).items():
+            schema = resolve_schema(raw_schema, openapi)
             print(
-                f"{index}: name={safe.get('parameter_name', safe.get('label', '?'))} "
-                f"type={safe.get('component', safe.get('type', '?'))} "
-                f"default={safe.get('parameter_default', safe.get('default', None))}"
+                f"- name={name} type={schema.get('type', 'object')} "
+                f"default={json.dumps(redact(schema.get('default')))}"
             )
-        signature = build_signature(endpoint)
-        print("\nFORGE3D_HUNYUAN_SIGNATURE_JSON=")
-        print(json.dumps(signature, ensure_ascii=False, separators=(",", ":")))
+        print("\nFORGE3D_HUNYUAN_ENDPOINT=/run/shape_generation")
         return 0
     except Exception as error:
         print(f"Falha segura na inspeção: {type(error).__name__}", file=sys.stderr)

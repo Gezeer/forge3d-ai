@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-import json
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator
 from urllib.parse import unquote, urlparse
 
 from app.core.config import Settings
-from app.core.exceptions import ArtifactNotFoundError, ServiceUnavailableError
+from app.core.exceptions import ArtifactNotFoundError
 from app.domain.generation import GenerationResult
 from app.engines.contracts import EngineHealth, JobContext
-from app.infrastructure.hunyuan_gateway import HunyuanGateway, HunyuanSignature
+from app.infrastructure.hunyuan_client import HunyuanClient
 from app.infrastructure.storage import LocalStorage
 
 
@@ -23,30 +22,13 @@ class HunyuanService:
         self,
         settings: Settings,
         storage: LocalStorage,
-        gateway: HunyuanGateway,
-        signature: Optional[HunyuanSignature] = None,
+        client: HunyuanClient,
         downloader=None,
     ) -> None:
         self.settings = settings
         self.storage = storage
-        self.gateway = gateway
-        self.signature = signature or self._signature_from_settings()
+        self.client = client
         self.downloader = downloader or self._download
-
-    def _signature_from_settings(self) -> Optional[HunyuanSignature]:
-        if not self.settings.hunyuan_signature_json.strip():
-            return None
-        try:
-            payload = json.loads(self.settings.hunyuan_signature_json)
-            args = payload.get("args", [])
-            kwargs = payload.get("kwargs", {})
-            if not isinstance(args, list) or not isinstance(kwargs, dict):
-                raise ValueError
-        except (json.JSONDecodeError, AttributeError, ValueError) as exc:
-            raise ServiceUnavailableError(
-                "A assinatura configurada do Hunyuan é inválida"
-            ) from exc
-        return HunyuanSignature(args=args, kwargs=kwargs)
 
     def _values(self, value: Any) -> Iterator[Any]:
         if isinstance(value, dict):
@@ -110,8 +92,10 @@ class HunyuanService:
         return destination
 
     @staticmethod
-    def _mesh_metadata(result: Any, signature: HunyuanSignature) -> dict[str, Any]:
+    def _mesh_metadata(result: Any, request_payload: dict[str, Any]) -> dict[str, Any]:
         metadata: dict[str, Any] = {}
+        if isinstance(result, dict) and isinstance(result.get("data"), (list, tuple)):
+            result = result["data"]
         stats = (
             result[2] if isinstance(result, (list, tuple)) and len(result) > 2 else None
         )
@@ -134,35 +118,27 @@ class HunyuanService:
                     if source in stats and isinstance(stats[source], (int, float, str)):
                         metadata[target] = stats[source]
                         break
-        args = signature.args
-        defaults = {
-            "steps": 5,
-            "guidance_scale": 6,
-            "seed": 7,
-            "octree_resolution": 8,
-        }
-        for key, index in defaults.items():
-            if key not in metadata and len(args) > index:
-                metadata[key] = args[index]
+        for key in ("steps", "guidance_scale", "seed", "octree_resolution"):
+            if key not in metadata and key in request_payload:
+                metadata[key] = request_payload[key]
         if isinstance(result, (list, tuple)) and len(result) > 3:
             if isinstance(result[3], (int, float, str)):
                 metadata["seed"] = result[3]
         return metadata
 
     def available(self) -> bool:
-        return self.signature is not None and self.gateway.available()
+        return self.client.available(self.settings.health_timeout_seconds)
 
     def health(self) -> EngineHealth:
-        configured = self.signature is not None
-        available = configured and self.gateway.available()
-        diagnostics = getattr(self.gateway, "diagnostics", lambda: {})()
+        available = self.client.available(self.settings.health_timeout_seconds)
+        diagnostics = self.client.diagnostics()
         return EngineHealth(
             name=self.name,
             available=available,
             details={
-                "configured": configured,
+                "configured": True,
                 "url": self.settings.hunyuan_url,
-                "api_name": self.settings.hunyuan_api_name,
+                "api_name": self.settings.hunyuan_endpoint,
                 **diagnostics,
             },
         )
@@ -170,21 +146,15 @@ class HunyuanService:
     def generate(self, job_context: JobContext, input_image: Path) -> GenerationResult:
         job_id = job_context.job_id
         job_dir = job_context.job_dir
-        if self.signature is None:
-            raise ServiceUnavailableError(
-                "Assinatura Hunyuan não configurada; inspecione a API no RunPod"
-            )
         started = time.monotonic()
-        raw_result = self.gateway.predict(
-            input_image,
-            self.signature,
-            self.settings.hunyuan_api_name,
-            self.settings.generation_timeout_seconds,
+        response = self.client.generate(
+            input_image, self.settings.generation_timeout_seconds
         )
+        raw_result = response.data
         origin, source, original_name = self._artifact_from_result(raw_result)
         artifact = self._materialize(origin, source, original_name, job_dir)
         duration = time.monotonic() - started
-        safe_mesh_metadata = self._mesh_metadata(raw_result, self.signature)
+        safe_mesh_metadata = self._mesh_metadata(raw_result, response.request_payload)
         return GenerationResult(
             job_id=job_id,
             engine=self.name,
