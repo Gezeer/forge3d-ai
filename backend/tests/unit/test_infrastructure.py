@@ -19,6 +19,9 @@ def test_settings_keep_runpod_defaults() -> None:
     assert settings.hunyuan_url == "http://127.0.0.1:8080"
     assert settings.hunyuan_endpoint == "/run/shape_generation"
     assert settings.hunyuan_retry_attempts == 5
+    assert settings.hunyuan_port == 8080
+    assert settings.hunyuan_cache_path == Path("/tmp/hunyuan-cache")
+    assert settings.gpu_lock_path == Path("/tmp/forge3d-gpu.lock")
     assert settings.health_timeout_seconds == 10
     assert settings.texture_cache == Path("/workspace/.cache/forge3d-texture")
     assert "proxy\\.runpod\\.net" in settings.cors_origin_regex
@@ -38,6 +41,9 @@ def test_settings_can_be_overridden() -> None:
             "FORGE3D_HUNYUAN_RETRY_ATTEMPTS": "3",
             "FORGE3D_AUTO_ENGINE_FALLBACK": "triposr",
             "FORGE3D_TEXTURE_CACHE": "/tmp/custom-texture-cache",
+            "FORGE3D_HUNYUAN_PORT": "8181",
+            "FORGE3D_HUNYUAN_CACHE_PATH": "/tmp/custom-hunyuan-cache",
+            "FORGE3D_GPU_LOCK_TIMEOUT_SECONDS": "99",
         }
     )
 
@@ -53,6 +59,10 @@ def test_settings_can_be_overridden() -> None:
     assert settings.hunyuan_retry_attempts == 3
     assert settings.auto_engine_fallback == "triposr"
     assert settings.texture_cache == Path("/tmp/custom-texture-cache")
+    assert settings.hunyuan_port == 8181
+    assert settings.hunyuan_url == "http://127.0.0.1:8181"
+    assert settings.hunyuan_cache_path == Path("/tmp/custom-hunyuan-cache")
+    assert settings.gpu_lock_timeout_seconds == 99
 
 
 @pytest.mark.parametrize(

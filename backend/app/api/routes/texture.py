@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.api.dependencies import Container, get_container
 from app.api.schemas import ErrorResponse, TextureJobResponse
-from app.core.exceptions import JobQueueFullError
+from app.core.exceptions import ArtifactNotFoundError, JobQueueFullError
 from app.domain.jobs import JobStatus, TextureStatus
 from app.engines.contracts import JobContext
 from app.texture.contracts import TextureRequest
@@ -132,6 +132,14 @@ def texture_status(
     job = container.jobs.get(job_id)
     if job is None or job.texture_status is None:
         raise HTTPException(status_code=404, detail="Estágio de textura não encontrado")
+    textured_exists = False
+    if job.texture_artifact_relative_path:
+        try:
+            textured_exists = container.storage.artifact_for_job(
+                job.id, job.texture_artifact_relative_path
+            ).is_file()
+        except ArtifactNotFoundError:
+            textured_exists = False
     return TextureJobResponse(
         job_id=job.id,
         engine="hunyuan",
@@ -139,6 +147,6 @@ def texture_status(
         status_url=f"/jobs/{job.id}",
         original_download_url=f"/download/{job.id}",
         textured_download_url=f"/download/{job.id}/textured"
-        if job.texture_status == TextureStatus.COMPLETED
+        if job.texture_status == TextureStatus.COMPLETED and textured_exists
         else None,
     )

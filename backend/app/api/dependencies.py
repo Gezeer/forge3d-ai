@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional
 
 from fastapi import Request
 
@@ -14,6 +15,9 @@ from app.queue.contracts import JobQueue
 from app.queue.executor import JobExecutor
 from app.services.upload_validation import UploadValidator
 
+if TYPE_CHECKING:
+    from app.hunyuan.process_manager import HunyuanProcessManager
+
 
 @dataclass
 class Container:
@@ -26,6 +30,7 @@ class Container:
     executor: JobExecutor
     job_queue: JobQueue
     metrics: MetricsRegistry
+    hunyuan_process_manager: Optional["HunyuanProcessManager"] = None
 
 
 def get_container(request: Request) -> Container:

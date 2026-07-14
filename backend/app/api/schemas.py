@@ -47,7 +47,7 @@ class JobResponse(BaseModel):
     output_textured_glb: Optional[str] = None
 
     @classmethod
-    def from_job(cls, job: Job) -> "JobResponse":
+    def from_job(cls, job: Job, *, textured_exists: bool = False) -> "JobResponse":
         return cls(
             job_id=job.id,
             engine=job.engine,
@@ -60,7 +60,7 @@ class JobResponse(BaseModel):
             texture_status=job.texture_status,
             texture_download_url=(
                 f"/download/{job.id}/textured"
-                if job.texture_status == TextureStatus.COMPLETED
+                if job.texture_status == TextureStatus.COMPLETED and textured_exists
                 else None
             ),
             texture_error=job.texture_error,

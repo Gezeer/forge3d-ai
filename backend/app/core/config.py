@@ -21,6 +21,13 @@ class Settings:
     hunyuan_endpoint: str = "/run/shape_generation"
     hunyuan_retry_attempts: int = 5
     hunyuan_retry_base_seconds: float = 0.5
+    hunyuan_root: Path = Path("/workspace/kai3d/models/Hunyuan3D-2.1")
+    hunyuan_python: Path = Path("/workspace/kai3d/models/Hunyuan3D-2.1/venv/bin/python")
+    hunyuan_port: int = 8080
+    hunyuan_cache_path: Path = Path("/tmp/hunyuan-cache")
+    hunyuan_start_timeout_seconds: float = 300.0
+    hunyuan_stop_timeout_seconds: float = 30.0
+    hunyuan_log: Path = Path("/tmp/hunyuan-shape.log")
     generation_timeout_seconds: float = 900.0
     upload_max_bytes: int = 20 * 1024 * 1024
     allowed_image_types: Tuple[str, ...] = (
@@ -49,12 +56,15 @@ class Settings:
     texture_command_json: str = ""
     texture_timeout_seconds: float = 1800.0
     texture_pipeline_version: str = "hunyuan3d-2.1"
+    gpu_lock_path: Path = Path("/tmp/forge3d-gpu.lock")
+    gpu_lock_timeout_seconds: float = 1800.0
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] = os.environ) -> "Settings":
         output_dir = Path(
             environ.get("FORGE3D_OUTPUT_DIR", "/workspace/forge3d-ai/outputs")
         )
+        hunyuan_port = int(environ.get("FORGE3D_HUNYUAN_PORT", "8080"))
         return cls(
             upload_dir=Path(
                 environ.get("FORGE3D_UPLOAD_DIR", "/workspace/forge3d-ai/uploads")
@@ -73,7 +83,9 @@ class Settings:
                 )
             ),
             triposr_device=environ.get("FORGE3D_TRIPOSR_DEVICE", "cuda:0"),
-            hunyuan_url=environ.get("FORGE3D_HUNYUAN_URL", "http://127.0.0.1:8080"),
+            hunyuan_url=environ.get(
+                "FORGE3D_HUNYUAN_URL", f"http://127.0.0.1:{hunyuan_port}"
+            ),
             hunyuan_endpoint=environ.get(
                 "FORGE3D_HUNYUAN_ENDPOINT", "/run/shape_generation"
             ),
@@ -82,6 +94,31 @@ class Settings:
             ),
             hunyuan_retry_base_seconds=float(
                 environ.get("FORGE3D_HUNYUAN_RETRY_BASE_SECONDS", "0.5")
+            ),
+            hunyuan_root=Path(
+                environ.get(
+                    "FORGE3D_HUNYUAN_ROOT",
+                    "/workspace/kai3d/models/Hunyuan3D-2.1",
+                )
+            ),
+            hunyuan_python=Path(
+                environ.get(
+                    "FORGE3D_HUNYUAN_PYTHON",
+                    "/workspace/kai3d/models/Hunyuan3D-2.1/venv/bin/python",
+                )
+            ),
+            hunyuan_port=hunyuan_port,
+            hunyuan_cache_path=Path(
+                environ.get("FORGE3D_HUNYUAN_CACHE_PATH", "/tmp/hunyuan-cache")
+            ),
+            hunyuan_start_timeout_seconds=float(
+                environ.get("FORGE3D_HUNYUAN_START_TIMEOUT_SECONDS", "300")
+            ),
+            hunyuan_stop_timeout_seconds=float(
+                environ.get("FORGE3D_HUNYUAN_STOP_TIMEOUT_SECONDS", "30")
+            ),
+            hunyuan_log=Path(
+                environ.get("FORGE3D_HUNYUAN_LOG", "/tmp/hunyuan-shape.log")
             ),
             generation_timeout_seconds=float(
                 environ.get("FORGE3D_GENERATION_TIMEOUT_SECONDS", "900")
@@ -144,6 +181,12 @@ class Settings:
             ),
             texture_pipeline_version=environ.get(
                 "FORGE3D_TEXTURE_PIPELINE_VERSION", "hunyuan3d-2.1"
+            ),
+            gpu_lock_path=Path(
+                environ.get("FORGE3D_GPU_LOCK_PATH", "/tmp/forge3d-gpu.lock")
+            ),
+            gpu_lock_timeout_seconds=float(
+                environ.get("FORGE3D_GPU_LOCK_TIMEOUT_SECONDS", "1800")
             ),
         )
 

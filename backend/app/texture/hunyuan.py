@@ -100,7 +100,7 @@ class HunyuanTextureService:
         request: TextureRequest,
         metadata_path: Path,
     ) -> Path:
-        logger.info("[Texture] Running Paint")
+        logger.info("paint_started")
         output_obj.unlink(missing_ok=True)
         command = [
             str(self.settings.texture_python),
@@ -123,7 +123,7 @@ class HunyuanTextureService:
             str(metadata_path),
         ]
         self._run_step("paint", command)
-        logger.info("[Texture] Paint finished")
+        logger.info("paint_completed")
         return self._require_artifact(output_obj, "paint")
 
     def convert_obj_to_glb(self, obj_path: Path, output_glb: Path) -> Path:

@@ -47,6 +47,17 @@ esperar Blender ou Paint. O job mantém o shape em `completed` e evolui
 
 Os parâmetros automáticos são `resolution=512` e `quality=fast`.
 
+Antes do pipeline, Shape e Paint são serializados por um lock de arquivo
+interprocesso. O `gradio_app.py --port 8080` é encerrado com SIGTERM, a saída do
+processo e a liberação da porta são confirmadas e a VRAM é registrada por
+`nvidia-smi` quando disponível. Em `finally`, o Shape é iniciado em nova sessão,
+com logs redirecionados, e o worker aguarda o OpenAPI voltar. O lock só é
+liberado depois dessa confirmação.
+
+Durante esse intervalo, o health usa os estados operacionais
+`paused_for_texture` e `restarting`, sem transformar a pausa controlada em falha
+global da API.
+
 ## API manual compatível
 
 O job de geometria precisa estar no estado `completed` e possuir `model.glb`.
@@ -126,4 +137,11 @@ Validação completa automática, usando `robot.png`:
 python3 backend/scripts/test_texture_e2e.py \
   --image /workspace/forge3d-ai/examples/robot.png \
   --api-url http://127.0.0.1:8000
+```
+
+Para validar também parada e reinício da porta 8080:
+
+```bash
+python3 backend/scripts/test_full_hunyuan_pipeline.py \
+  --image /workspace/forge3d-ai/examples/robot.png
 ```

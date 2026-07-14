@@ -38,6 +38,27 @@ def test_health_preserves_legacy_fields_and_degrades_for_hunyuan(tmp_path):
     assert body["engines"]["hunyuan"]["available"] is False
 
 
+def test_health_reports_hunyuan_paused_for_texture_without_failing_api(tmp_path):
+    client, container = _client(
+        tmp_path, hunyuan=FakeGenerator("hunyuan", available=False)
+    )
+
+    class ManagedState:
+        operational_state = "paused_for_texture"
+
+    manager = ManagedState()
+    container.hunyuan_process_manager = manager
+    with client:
+        paused = client.get("/health").json()
+        manager.operational_state = "restarting"
+        restarting = client.get("/health").json()
+
+    assert paused["engines"]["hunyuan"]["status"] == "paused_for_texture"
+    assert paused["status"] == "degraded"
+    assert restarting["engines"]["hunyuan"]["status"] == "restarting"
+    assert restarting["status"] == "degraded"
+
+
 def test_live_does_not_call_engines(tmp_path):
     client, container = _client(tmp_path)
 

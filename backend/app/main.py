@@ -12,6 +12,8 @@ from app.api.routes import downloads, generation, health, metrics, texture
 from app.core.config import Settings
 from app.engines.policy import AutoEnginePolicy
 from app.engines.registry import EngineRegistry
+from app.gpu.lock import GPULock
+from app.hunyuan.process_manager import HunyuanProcessManager
 from app.infrastructure.hunyuan_client import HunyuanClient
 from app.infrastructure.job_repository import JsonJobRepository
 from app.infrastructure.storage import LocalStorage
@@ -31,6 +33,15 @@ from app.texture.hunyuan import HunyuanTextureService
 def build_container(settings: Settings) -> Container:
     storage = LocalStorage(settings.upload_dir, settings.output_dir)
     jobs = JsonJobRepository(settings.jobs_file)
+    process_manager = HunyuanProcessManager(
+        root=settings.hunyuan_root,
+        python=settings.hunyuan_python,
+        port=settings.hunyuan_port,
+        cache_path=settings.hunyuan_cache_path,
+        start_timeout=settings.hunyuan_start_timeout_seconds,
+        stop_timeout=settings.hunyuan_stop_timeout_seconds,
+        log_path=settings.hunyuan_log,
+    )
     registry = EngineRegistry()
     registry.register(TripoSRService(settings, SubprocessRunner()))
     registry.register(
@@ -43,12 +54,25 @@ def build_container(settings: Settings) -> Container:
                 retry_attempts=settings.hunyuan_retry_attempts,
                 retry_base_seconds=settings.hunyuan_retry_base_seconds,
             ),
+            gpu_lock=GPULock(
+                settings.gpu_lock_path,
+                timeout=settings.gpu_lock_timeout_seconds,
+            ),
+            process_manager=process_manager,
         )
     )
     metrics_registry = MetricsRegistry(settings.metrics_enabled)
     executor = JobExecutor(jobs, registry, metrics_registry)
     texture_service = HunyuanTextureService(settings, SubprocessRunner())
-    texture_executor = TextureExecutor(jobs, texture_service)
+    texture_executor = TextureExecutor(
+        jobs,
+        texture_service,
+        process_manager=process_manager,
+        gpu_lock=GPULock(
+            settings.gpu_lock_path,
+            timeout=settings.gpu_lock_timeout_seconds,
+        ),
+    )
     job_queue = LocalJobQueue(
         executor,
         jobs,
@@ -71,6 +95,7 @@ def build_container(settings: Settings) -> Container:
         executor=executor,
         job_queue=job_queue,
         metrics=metrics_registry,
+        hunyuan_process_manager=process_manager,
     )
 
 

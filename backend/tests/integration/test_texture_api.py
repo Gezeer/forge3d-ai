@@ -2,7 +2,7 @@ import time
 from pathlib import Path
 from uuid import uuid4
 
-from app.domain.jobs import Job, JobStatus
+from app.domain.jobs import Job, JobStatus, TextureStatus
 from app.texture.contracts import TextureResult
 from app.texture.executor import TextureExecutor
 from test_api import _client
@@ -162,3 +162,23 @@ def test_hunyuan_generation_automatically_textures_and_downloads(tmp_path: Path)
         assert status["texture_error"] is None
         assert client.get(f"/download/{job_id}").content == b"glb"
         assert client.get(f"/download/{job_id}/textured").content == b"pbr"
+
+
+def test_textured_download_url_requires_physical_artifact(tmp_path: Path):
+    client, container = _client(tmp_path)
+    job = completed_job(tmp_path, container)
+    job = job.transition_texture(TextureStatus.PROCESSING).transition_texture(
+        TextureStatus.COMPLETED,
+        artifact_relative_path="model_textured.glb",
+        output_textured_glb=f"outputs/{job.id}/model_textured.glb",
+    )
+    container.jobs.save(job)
+
+    with client:
+        status = client.get(f"/jobs/{job.id}").json()
+        texture = client.get(f"/jobs/{job.id}/texture").json()
+        download = client.get(f"/download/{job.id}/textured")
+
+    assert status["texture_download_url"] is None
+    assert texture["textured_download_url"] is None
+    assert download.status_code == 404

@@ -35,10 +35,23 @@ def home() -> dict:
 
 def _snapshot(container: Container) -> HealthResponse:
     settings = container.settings
-    engine_health = [
-        _health_with_timeout(engine, settings.health_timeout_seconds)
-        for engine in container.engines.list()
-    ]
+    manager = container.hunyuan_process_manager
+    controlled_state = manager.operational_state if manager is not None else None
+    controlled = controlled_state in {"paused_for_texture", "restarting"}
+    engine_health = []
+    for engine in container.engines.list():
+        if engine.name == "hunyuan" and controlled:
+            engine_health.append(
+                EngineHealth(
+                    "hunyuan",
+                    False,
+                    {"configured": True, "operational_state": controlled_state},
+                )
+            )
+        else:
+            engine_health.append(
+                _health_with_timeout(engine, settings.health_timeout_seconds)
+            )
     storage_ok = (
         settings.upload_dir.is_dir()
         and settings.output_dir.is_dir()
@@ -46,7 +59,7 @@ def _snapshot(container: Container) -> HealthResponse:
     )
     repository_ok = settings.jobs_file.parent.is_dir()
     queue_ok = container.job_queue.started
-    any_engine = any(item.available for item in engine_health)
+    any_engine = any(item.available for item in engine_health) or controlled
     infrastructure_ok = storage_ok and repository_ok and queue_ok
     if not infrastructure_ok or not any_engine:
         overall = "unhealthy"
@@ -57,10 +70,13 @@ def _snapshot(container: Container) -> HealthResponse:
     engines = {}
     for item in engine_health:
         configured = bool(item.details.get("configured", True))
+        status = "healthy" if item.available else "unavailable"
+        if item.name == "hunyuan" and controlled:
+            status = controlled_state
         engines[item.name] = {
             "configured": configured,
             "available": item.available,
-            "status": "healthy" if item.available else "unavailable",
+            "status": status,
             "details": item.details,
         }
     return HealthResponse(

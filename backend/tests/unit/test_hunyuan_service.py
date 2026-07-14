@@ -256,3 +256,41 @@ def test_hunyuan_update_value_rejects_unsupported_extension(tmp_path: Path) -> N
 
     with pytest.raises(ArtifactNotFoundError):
         service.generate(JobContext(uuid4(), job_dir), tmp_path / "image.png")
+
+
+def test_hunyuan_shape_generation_uses_gpu_lock_and_ensures_server(tmp_path: Path):
+    source = tmp_path / "white_mesh.glb"
+    source.write_bytes(b"glb")
+    settings = Settings(upload_dir=tmp_path / "uploads", output_dir=tmp_path)
+    storage = LocalStorage(settings.upload_dir, settings.output_dir)
+    events = []
+
+    class Lock:
+        def __enter__(self):
+            events.append("lock")
+
+        def __exit__(self, *args):
+            events.append("unlock")
+
+    class Manager:
+        def ensure_shape_running(self):
+            events.append("ensure")
+
+    gateway = FakeGateway({"path": str(source)})
+    service = HunyuanService(
+        settings,
+        storage,
+        gateway,
+        gpu_lock=Lock(),
+        process_manager=Manager(),
+    )
+    job_id = uuid4()
+    job_dir = tmp_path / str(job_id)
+    job_dir.mkdir()
+    image = job_dir / "robot.png"
+    image.write_bytes(b"png")
+
+    service.generate(JobContext(job_id, job_dir), image)
+
+    assert events == ["lock", "ensure", "unlock"]
+    assert gateway.call[0] == image

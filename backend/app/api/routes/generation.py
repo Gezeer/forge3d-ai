@@ -200,4 +200,12 @@ def get_job(job_id: UUID, container: Container = Depends(get_container)) -> JobR
     job = container.jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job não encontrado")
-    return JobResponse.from_job(job)
+    textured_exists = False
+    if job.texture_artifact_relative_path:
+        try:
+            textured_exists = container.storage.artifact_for_job(
+                job.id, job.texture_artifact_relative_path
+            ).is_file()
+        except GenerationError:
+            textured_exists = False
+    return JobResponse.from_job(job, textured_exists=textured_exists)

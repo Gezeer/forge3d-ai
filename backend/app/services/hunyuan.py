@@ -10,6 +10,8 @@ from app.core.config import Settings
 from app.core.exceptions import ArtifactNotFoundError
 from app.domain.generation import GenerationResult
 from app.engines.contracts import EngineHealth, JobContext
+from app.gpu.lock import GPULock
+from app.hunyuan.process_manager import HunyuanProcessManager
 from app.infrastructure.hunyuan_client import HunyuanClient
 from app.infrastructure.storage import LocalStorage
 
@@ -24,11 +26,15 @@ class HunyuanService:
         storage: LocalStorage,
         client: HunyuanClient,
         downloader=None,
+        gpu_lock: GPULock | None = None,
+        process_manager: HunyuanProcessManager | None = None,
     ) -> None:
         self.settings = settings
         self.storage = storage
         self.client = client
         self.downloader = downloader or self._download
+        self.gpu_lock = gpu_lock
+        self.process_manager = process_manager
 
     def _values(self, value: Any) -> Iterator[Any]:
         if isinstance(value, dict):
@@ -147,9 +153,16 @@ class HunyuanService:
         job_id = job_context.job_id
         job_dir = job_context.job_dir
         started = time.monotonic()
-        response = self.client.generate(
-            input_image, self.settings.generation_timeout_seconds
-        )
+        if self.gpu_lock is not None and self.process_manager is not None:
+            with self.gpu_lock:
+                self.process_manager.ensure_shape_running()
+                response = self.client.generate(
+                    input_image, self.settings.generation_timeout_seconds
+                )
+        else:
+            response = self.client.generate(
+                input_image, self.settings.generation_timeout_seconds
+            )
         raw_result = response.data
         origin, source, original_name = self._artifact_from_result(raw_result)
         artifact = self._materialize(origin, source, original_name, job_dir)

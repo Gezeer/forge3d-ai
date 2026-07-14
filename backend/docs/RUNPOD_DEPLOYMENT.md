@@ -95,6 +95,12 @@ Blender → Hunyuan Paint → Blender. O GLB branco continua em
 `outputs/<job_id>/texture_work`; o resultado final é
 `outputs/<job_id>/model_textured.glb`.
 
+O acesso à GPU é serializado por `FORGE3D_GPU_LOCK_PATH`. Depois do shape, o
+worker envia SIGTERM somente ao processo cujo Python, `gradio_app.py`, porta e
+diretório de trabalho correspondem à configuração. SIGKILL só é usado após
+`FORGE3D_HUNYUAN_STOP_TIMEOUT_SECONDS`. FastAPI, Blender e outros processos
+Python nunca são alvos.
+
 ```bash
 export FORGE3D_TEXTURE_ROOT=/workspace/kai3d/models/Hunyuan3D-2.1
 export FORGE3D_TEXTURE_PYTHON=/workspace/kai3d/models/Hunyuan3D-2.1/venv/bin/python
@@ -102,6 +108,12 @@ export FORGE3D_BLENDER_EXECUTABLE=/usr/bin/blender
 export FORGE3D_TEXTURE_CACHE=/workspace/.cache/forge3d-texture
 export TMPDIR=/tmp
 export FORGE3D_TEXTURE_TIMEOUT_SECONDS=1800
+export FORGE3D_HUNYUAN_ROOT=/workspace/kai3d/models/Hunyuan3D-2.1
+export FORGE3D_HUNYUAN_PYTHON=/workspace/kai3d/models/Hunyuan3D-2.1/venv/bin/python
+export FORGE3D_HUNYUAN_PORT=8080
+export FORGE3D_HUNYUAN_CACHE_PATH=/tmp/hunyuan-cache
+export FORGE3D_HUNYUAN_LOG=/tmp/hunyuan-shape.log
+export FORGE3D_GPU_LOCK_PATH=/tmp/forge3d-gpu.lock
 python3 backend/scripts/test_texture_e2e.py \
   --image /workspace/forge3d-ai/examples/robot.png
 ```
@@ -110,6 +122,16 @@ O teste espera `texture_status=completed`, baixa o GLB branco e o texturizado,
 valida o cabeçalho GLB, executa `file` e rejeita artefatos vazios. Se Blender ou
 Paint falhar, o shape permanece `completed`, o download original continua ativo
 e a textura termina com `texture_status=failed` e erro resumido.
+
+Teste completo do ciclo de VRAM:
+
+```bash
+python3 backend/scripts/test_full_hunyuan_pipeline.py \
+  --image /workspace/forge3d-ai/examples/robot.png
+```
+
+O script exige observar a porta 8080 fechada em `texturing`, novamente aberta
+ao final, health Hunyuan saudável e os dois GLBs 2.0 válidos.
 
 O Paint nunca usa `/root/.cache` nem `~/.cache`. Antes de importar as bibliotecas
 de ML, o wrapper direciona todos os caches HuggingFace, Transformers, Diffusers

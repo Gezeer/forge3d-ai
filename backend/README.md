@@ -52,18 +52,18 @@ alterar modelos.
 
 ### Terminal 1 — iniciar Hunyuan na porta 8080
 
-O comando de inicialização varia conforme o checkout real do Hunyuan. Informe o
-comando já validado nesse ambiente:
+Use o mesmo comando e variáveis que o gerenciador de processo reconhecerá:
 
 ```bash
 cd /workspace/forge3d-ai
-export HUNYUAN_ROOT=/workspace/kai3d/models/Hunyuan3D-2.1
-export HUNYUAN_PORT=8080
-export HUNYUAN_START_COMMAND='<comando real do Hunyuan que publica a porta 8080>'
+export FORGE3D_HUNYUAN_ROOT=/workspace/kai3d/models/Hunyuan3D-2.1
+export FORGE3D_HUNYUAN_PYTHON=/workspace/kai3d/models/Hunyuan3D-2.1/venv/bin/python
+export FORGE3D_HUNYUAN_PORT=8080
+export FORGE3D_HUNYUAN_CACHE_PATH=/tmp/hunyuan-cache
 backend/scripts/start_hunyuan.sh
 ```
 
-O script falha se o diretório ou comando estiver ausente e não instala nada.
+O script falha se o diretório ou Python estiver ausente e não instala nada.
 
 ### Terminal 2 — inspecionar o OpenAPI publicado
 
@@ -94,6 +94,29 @@ O pipeline usa resolução `512`, qualidade `fast`, preserva o GLB branco e grav
 os intermediários em `outputs/<job_id>/texture_work`. Consulte o job até
 `texture_status=completed` ou `texture_status=failed`; o GLB texturizado fica em
 `GET /download/{job_id}/textured`.
+
+Na RTX 3090, Shape e Paint não permanecem residentes simultaneamente. O worker
+adquire `/tmp/forge3d-gpu.lock`, encerra exclusivamente o processo configurado
+`gradio_app.py --port 8080`, confirma processo e porta liberados, executa Paint
+e reinicia o Shape em `finally`. O novo processo só é considerado pronto quando
+`/gradio_api/openapi.json` responde HTTP 200.
+
+```bash
+export FORGE3D_HUNYUAN_ROOT=/workspace/kai3d/models/Hunyuan3D-2.1
+export FORGE3D_HUNYUAN_PYTHON=/workspace/kai3d/models/Hunyuan3D-2.1/venv/bin/python
+export FORGE3D_HUNYUAN_PORT=8080
+export FORGE3D_HUNYUAN_CACHE_PATH=/tmp/hunyuan-cache
+export FORGE3D_HUNYUAN_START_TIMEOUT_SECONDS=300
+export FORGE3D_HUNYUAN_STOP_TIMEOUT_SECONDS=30
+export FORGE3D_HUNYUAN_LOG=/tmp/hunyuan-shape.log
+export FORGE3D_GPU_LOCK_PATH=/tmp/forge3d-gpu.lock
+export FORGE3D_GPU_LOCK_TIMEOUT_SECONDS=1800
+```
+
+Durante o Paint, `/health` mantém a API operacional e informa
+`engines.hunyuan.status=paused_for_texture`; durante a subida, informa
+`restarting`. Falha de reinício é registrada separadamente e nunca substitui o
+erro principal da textura.
 
 ```bash
 export FORGE3D_TEXTURE_ROOT=/workspace/kai3d/models/Hunyuan3D-2.1
