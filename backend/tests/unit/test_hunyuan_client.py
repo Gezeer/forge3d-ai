@@ -57,6 +57,22 @@ def openapi(image_schema=None):
     }
 
 
+def gradio_config(*, include_state=True):
+    components = [{"id": 1, "type": "image"}]
+    inputs = [1]
+    if include_state:
+        components.insert(0, {"id": 0, "type": "state"})
+        inputs.insert(0, 0)
+    for component_id in range(2, 13):
+        components.append({"id": component_id, "type": "component"})
+        inputs.append(component_id)
+    return {
+        "api_prefix": "/gradio_api",
+        "components": components,
+        "dependencies": [{"api_name": "shape_generation", "inputs": inputs}],
+    }
+
+
 class FakeHttp:
     def __init__(self, gets=None, posts=None):
         self.gets = list(gets or [])
@@ -176,7 +192,7 @@ def test_client_posts_json_to_run_shape_generation(tmp_path: Path):
     image = tmp_path / "robot.png"
     image.write_bytes(b"png")
     http = FakeHttp(
-        [response(200, openapi()), response(200, {"api_prefix": "/gradio_api"})],
+        [response(200, openapi()), response(200, gradio_config())],
         [response(200, {"value": "/tmp/white_mesh.glb"})],
     )
     client = HunyuanClient("http://hunyuan:8080", http_client=http)
@@ -192,6 +208,7 @@ def test_client_posts_json_to_run_shape_generation(tmp_path: Path):
     assert client.endpoint == "/run/shape_generation"
     assert payload == {
         "data": [
+            None,
             result.request_payload["image"],
             None,
             None,
@@ -206,7 +223,80 @@ def test_client_posts_json_to_run_shape_generation(tmp_path: Path):
             False,
         ]
     }
-    assert len(payload["data"]) == 12
+    assert len(payload["data"]) == 13
+    assert payload["data"][0] is None
+    assert payload["data"][1] == result.request_payload["image"]
+
+
+def test_client_uses_single_fallback_state_when_config_is_unavailable(
+    tmp_path: Path,
+):
+    image = tmp_path / "robot.png"
+    image.write_bytes(b"png")
+    http = FakeHttp(
+        [response(200, openapi()), response(404, {"detail": "not found"})],
+        [response(200, {"data": []})],
+    )
+    client = HunyuanClient("http://hunyuan:8080", http_client=http)
+
+    client.generate(image, 20)
+
+    data = http.calls[-1][3]["data"]
+    assert len(data) == 13
+    assert data[0] is None
+    assert data[1] is not None
+
+
+def test_client_does_not_duplicate_state_published_by_contract(tmp_path: Path):
+    image = tmp_path / "robot.png"
+    image.write_bytes(b"png")
+    schema = openapi()
+    shape_input = schema["components"]["schemas"]["ShapeInput"]
+    shape_input["properties"] = {
+        "state": {"type": "state"},
+        **shape_input["properties"],
+    }
+    shape_input["required"].insert(0, "state")
+    http = FakeHttp(
+        [response(200, schema), response(200, gradio_config())],
+        [response(200, {"data": []})],
+    )
+    client = HunyuanClient("http://hunyuan:8080", http_client=http)
+
+    result = client.generate(image, 20)
+
+    data = http.calls[-1][3]["data"]
+    assert len(data) == 13
+    assert data[:2] == [None, result.request_payload["image"]]
+
+
+def test_client_preserves_safe_remote_http_500_summary(tmp_path: Path, caplog):
+    image = tmp_path / "robot.png"
+    image.write_bytes(b"png")
+    http = FakeHttp(
+        [response(200, openapi()), response(200, gradio_config())],
+        [
+            response(
+                500,
+                {
+                    "error": (
+                        "needed: 13, got: 12 "
+                        "https://signed.test/file?token=SECRET /tmp/private.glb"
+                    )
+                },
+            )
+        ],
+    )
+    client = HunyuanClient("http://hunyuan:8080", http_client=http)
+
+    with pytest.raises(
+        ServiceUnavailableError,
+        match=r"HTTP 500: needed: 13, got: 12 \[url\]",
+    ):
+        client.generate(image, 20)
+
+    assert "SECRET" not in caplog.text
+    assert "needed: 13, got: 12" in caplog.text
 
 
 def test_client_does_not_duplicate_gradio_api_prefix(tmp_path: Path):

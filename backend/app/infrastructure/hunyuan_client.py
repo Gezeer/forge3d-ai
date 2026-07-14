@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import base64
+import json
+import logging
 import mimetypes
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +34,7 @@ FALLBACK_DEFAULTS: dict[str, Any] = {
     "randomize_seed": False,
 }
 IMAGE_FIELDS = ("image", "input_image")
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -71,6 +75,7 @@ class HunyuanClient:
         self._http_client = http_client
         self.sleeper = sleeper
         self._openapi: Optional[dict[str, Any]] = None
+        self._config: Optional[dict[str, Any]] = None
         self._api_prefix: Optional[str] = None
         self.last_error: Optional[str] = None
 
@@ -102,9 +107,11 @@ class HunyuanClient:
             response = self.http.get(self._url(CONFIG_PATH), timeout=timeout)
             response.raise_for_status()
             config = response.json()
+            self._config = config if isinstance(config, dict) else None
             value = config.get("api_prefix") if isinstance(config, dict) else None
             self._api_prefix = self._normalize_api_prefix(value)
         except (httpx.HTTPError, ValueError):
+            self._config = None
             self._api_prefix = FALLBACK_API_PREFIX
         return self._api_prefix
 
@@ -288,7 +295,55 @@ class HunyuanClient:
         properties = schema.get("properties", {})
         if not isinstance(properties, dict):
             raise ServiceUnavailableError("Schema JSON do Hunyuan sem propriedades")
-        return {"data": [payload[name] for name in properties if name in payload]}
+        published_values = [payload[name] for name in properties if name in payload]
+        if self._requires_hidden_state(properties, len(published_values)):
+            published_values.insert(0, None)
+        return {"data": published_values}
+
+    @staticmethod
+    def _component_type(component: Any) -> str:
+        if not isinstance(component, dict):
+            return ""
+        value = component.get("type") or component.get("component")
+        if isinstance(value, str):
+            return value.rsplit(".", 1)[-1].lower()
+        return ""
+
+    def _config_input_types(self) -> Optional[list[str]]:
+        if not isinstance(self._config, dict):
+            return None
+        components = {
+            component.get("id"): self._component_type(component)
+            for component in self._config.get("components", [])
+            if isinstance(component, dict) and "id" in component
+        }
+        api_name = self.endpoint.rstrip("/").rsplit("/", 1)[-1]
+        for dependency in self._config.get("dependencies", []):
+            if not isinstance(dependency, dict):
+                continue
+            dependency_name = dependency.get("api_name")
+            if isinstance(dependency_name, str):
+                dependency_name = dependency_name.strip("/").rsplit("/", 1)[-1]
+            if dependency_name != api_name:
+                continue
+            inputs = dependency.get("inputs")
+            if isinstance(inputs, list):
+                return [components.get(component_id, "") for component_id in inputs]
+        return None
+
+    def _requires_hidden_state(
+        self, properties: Mapping[str, Any], published_count: int
+    ) -> bool:
+        input_types = self._config_input_types()
+        if input_types is not None:
+            if len(input_types) == published_count:
+                return False
+            if len(input_types) == published_count + 1 and input_types[:1] == ["state"]:
+                return True
+        first_property = next(iter(properties.values()), None)
+        if self._component_type(first_property) == "state":
+            return False
+        return self.endpoint == DEFAULT_ENDPOINT
 
     def available(self, timeout: float) -> bool:
         try:
@@ -317,6 +372,26 @@ class HunyuanClient:
             return urljoin(f"{self.base_url}/", value.lstrip("/"))
         return value
 
+    @staticmethod
+    def _safe_remote_error(response: httpx.Response) -> str:
+        try:
+            body = response.json()
+        except ValueError:
+            body = response.text
+        if isinstance(body, dict):
+            selected = next(
+                (body[key] for key in ("error", "detail", "message") if key in body),
+                "erro remoto sem detalhes",
+            )
+            text = selected if isinstance(selected, str) else json.dumps(selected)
+        else:
+            text = str(body)
+        text = re.sub(r"data:[^;\s]+;base64,[A-Za-z0-9+/=]+", "[image]", text)
+        text = re.sub(r"https?://\S+", "[url]", text)
+        text = re.sub(r"(?:^|\s)/(?:tmp|workspace|home)/\S+", " [path]", text)
+        text = " ".join(text.split())
+        return text[:300] or "erro remoto sem detalhes"
+
     def generate(self, image_path: Path, timeout: float) -> HunyuanResult:
         if not image_path.is_file():
             raise ServiceUnavailableError("Imagem Hunyuan não encontrada")
@@ -341,6 +416,19 @@ class HunyuanClient:
             except httpx.ReadTimeout as exc:
                 raise GenerationTimeoutError(
                     "A geração Hunyuan excedeu o tempo limite configurado"
+                ) from exc
+            except httpx.HTTPStatusError as exc:
+                summary = self._safe_remote_error(exc.response)
+                self.last_error = f"HTTP_{exc.response.status_code}"
+                logger.warning(
+                    "Hunyuan Gradio request failed status=%s endpoint=%s error=%s",
+                    exc.response.status_code,
+                    self.endpoint,
+                    summary,
+                )
+                raise ServiceUnavailableError(
+                    "Hunyuan remoto retornou "
+                    f"HTTP {exc.response.status_code}: {summary}"
                 ) from exc
             except (httpx.ConnectError, ServiceUnavailableError) as exc:
                 last_error = exc

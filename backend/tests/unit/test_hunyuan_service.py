@@ -163,6 +163,75 @@ def test_hunyuan_normalizes_real_shape_generation_tuple_and_mesh_stats(
     assert result.metadata["octree_resolution"] == 256
 
 
+def test_hunyuan_parses_gradio_data_value_path_metadata_and_seed(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "white_mesh.glb"
+    source.write_bytes(b"valid-glb")
+    response = {
+        "data": [
+            {
+                "value": {
+                    "path": str(source),
+                    "url": "https://temporary.example/white_mesh.glb?token=SECRET",
+                }
+            },
+            "<html>preview</html>",
+            {"number_of_faces": 321, "number_of_vertices": 123},
+            9876,
+        ]
+    }
+    service = _service(tmp_path, response)
+    job_id = uuid4()
+    job_dir = tmp_path / "outputs" / str(job_id)
+    job_dir.mkdir(parents=True)
+
+    result = service.generate(JobContext(job_id, job_dir), tmp_path / "image.png")
+
+    assert result.artifact_path == job_dir / "model.glb"
+    assert result.artifact_path.read_bytes() == b"valid-glb"
+    assert result.metadata["number_of_faces"] == 321
+    assert result.metadata["number_of_vertices"] == 123
+    assert result.metadata["seed"] == 9876
+    assert "temporary.example" not in str(result.metadata)
+
+
+def test_hunyuan_falls_back_to_gradio_value_url(tmp_path: Path) -> None:
+    downloaded = []
+
+    def downloader(url, destination):
+        downloaded.append(url)
+        destination.write_bytes(b"remote-glb")
+
+    settings = Settings(upload_dir=tmp_path / "uploads", output_dir=tmp_path)
+    storage = LocalStorage(settings.upload_dir, settings.output_dir)
+    service = HunyuanService(
+        settings,
+        storage,
+        FakeGateway(
+            {
+                "data": [
+                    {
+                        "value": {
+                            "path": "/tmp/missing/white_mesh.glb",
+                            "url": "https://temporary.example/white_mesh.glb",
+                        }
+                    }
+                ]
+            }
+        ),
+        downloader=downloader,
+    )
+    job_id = uuid4()
+    job_dir = tmp_path / str(job_id)
+    job_dir.mkdir()
+
+    result = service.generate(JobContext(job_id, job_dir), tmp_path / "image.png")
+
+    assert result.artifact_path.read_bytes() == b"remote-glb"
+    assert downloaded == ["https://temporary.example/white_mesh.glb"]
+
+
 def test_hunyuan_update_value_must_exist(tmp_path: Path) -> None:
     service = _service(
         tmp_path,

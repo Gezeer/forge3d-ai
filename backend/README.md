@@ -84,7 +84,10 @@ export FORGE3D_HUNYUAN_RETRY_BASE_SECONDS=0.5
 
 Não existe assinatura JSON configurável. O cliente monta os valores pelos nomes
 e defaults do OpenAPI e os serializa no envelope Gradio `{"data":[...]}`, usando
-a ordem das propriedades publicada pelo schema.
+a ordem das propriedades publicada pelo schema. Para `shape_generation`, o
+handler recebe antes delas um componente `State` oculto: o cliente o detecta em
+`/config` e insere exatamente um `null` no índice zero. Quando `/config` não
+expõe esse componente, o mesmo `null` inicial é aplicado como fallback seguro.
 
 ### Terminal 3 — iniciar Forge3D na porta 8000
 

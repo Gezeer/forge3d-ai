@@ -73,6 +73,11 @@ O Forge3D exige `/gradio_api/openapi.json` com o endpoint lógico
 `POST /gradio_api/run/shape_generation`. O health apenas valida o contrato e não
 executa geração.
 
+Embora o OpenAPI publique 12 parâmetros, o handler real recebe 13 entradas: um
+`State` oculto (`null`) no índice zero e, depois, os 12 valores na ordem do
+schema. O cliente detecta esse componente em `/config`, evita duplicá-lo e usa
+um único `null` inicial como fallback específico para `shape_generation`.
+
 ```bash
 curl -s http://127.0.0.1:8000/health | python3 -m json.tool
 PYTHONPATH=backend python3 backend/scripts/inspect_hunyuan_api.py
