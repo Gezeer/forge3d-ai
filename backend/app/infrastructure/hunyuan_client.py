@@ -13,10 +13,11 @@ import httpx
 from app.core.exceptions import GenerationTimeoutError, ServiceUnavailableError
 
 OPENAPI_PATH = "/gradio_api/openapi.json"
+CONFIG_PATH = "/config"
+FALLBACK_API_PREFIX = "/gradio_api"
 DEFAULT_ENDPOINT = "/run/shape_generation"
 LOADING_STATUS_CODES = {425, 429, 502, 503, 504}
 FALLBACK_DEFAULTS: dict[str, Any] = {
-    "caption": None,
     "mv_image_front": None,
     "mv_image_back": None,
     "mv_image_left": None,
@@ -60,12 +61,17 @@ class HunyuanClient:
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        if self.base_url.endswith(FALLBACK_API_PREFIX):
+            self.base_url = self.base_url[: -len(FALLBACK_API_PREFIX)]
         self.endpoint = endpoint if endpoint.startswith("/") else f"/{endpoint}"
+        if self.endpoint.startswith(f"{FALLBACK_API_PREFIX}/"):
+            self.endpoint = self.endpoint[len(FALLBACK_API_PREFIX) :]
         self.retry_attempts = max(1, retry_attempts)
         self.retry_base_seconds = max(0.0, retry_base_seconds)
         self._http_client = http_client
         self.sleeper = sleeper
         self._openapi: Optional[dict[str, Any]] = None
+        self._api_prefix: Optional[str] = None
         self.last_error: Optional[str] = None
 
     @property
@@ -79,6 +85,38 @@ class HunyuanClient:
 
     def _backoff(self, attempt: int) -> None:
         self.sleeper(self.retry_base_seconds * (2**attempt))
+
+    @staticmethod
+    def _normalize_api_prefix(value: Any) -> str:
+        if not isinstance(value, str) or not value.strip():
+            return FALLBACK_API_PREFIX
+        prefix = value.strip().rstrip("/")
+        if not prefix.startswith("/"):
+            prefix = f"/{prefix}"
+        return "" if prefix == "/" else prefix
+
+    def _discover_api_prefix(self, timeout: float) -> str:
+        if self._api_prefix is not None:
+            return self._api_prefix
+        try:
+            response = self.http.get(self._url(CONFIG_PATH), timeout=timeout)
+            response.raise_for_status()
+            config = response.json()
+            value = config.get("api_prefix") if isinstance(config, dict) else None
+            self._api_prefix = self._normalize_api_prefix(value)
+        except (httpx.HTTPError, ValueError):
+            self._api_prefix = FALLBACK_API_PREFIX
+        return self._api_prefix
+
+    def execution_url(self, timeout: float) -> str:
+        prefix = self._discover_api_prefix(timeout)
+        root = self.base_url
+        if prefix and not root.endswith(prefix):
+            root = f"{root}{prefix}"
+        logical_endpoint = self.endpoint
+        if prefix and logical_endpoint.startswith(f"{prefix}/"):
+            logical_endpoint = logical_endpoint[len(prefix) :]
+        return f"{root}{logical_endpoint}"
 
     @staticmethod
     def _loading_response(response: httpx.Response) -> bool:
@@ -109,6 +147,7 @@ class HunyuanClient:
                         f"Endpoint Hunyuan ausente no OpenAPI: {self.endpoint}"
                     )
                 self._openapi = schema
+                self._discover_api_prefix(timeout)
                 self.last_error = None
                 return schema
             except (httpx.HTTPError, ValueError, ServiceUnavailableError) as exc:
@@ -242,6 +281,15 @@ class HunyuanClient:
                 payload[name] = None
         return payload
 
+    def build_envelope(
+        self, payload: Mapping[str, Any], openapi: dict[str, Any]
+    ) -> dict[str, list[Any]]:
+        schema = self._request_schema(openapi)
+        properties = schema.get("properties", {})
+        if not isinstance(properties, dict):
+            raise ServiceUnavailableError("Schema JSON do Hunyuan sem propriedades")
+        return {"data": [payload[name] for name in properties if name in payload]}
+
     def available(self, timeout: float) -> bool:
         try:
             self.discover(timeout)
@@ -253,6 +301,8 @@ class HunyuanClient:
         return {
             "openapi": "available" if self._openapi is not None else "unavailable",
             "endpoint": self.endpoint,
+            "api_prefix": self._api_prefix or FALLBACK_API_PREFIX,
+            "execution_url": self.execution_url(2.0),
             "error_code": self.last_error,
         }
 
@@ -272,11 +322,14 @@ class HunyuanClient:
             raise ServiceUnavailableError("Imagem Hunyuan não encontrada")
         openapi = self.discover(min(timeout, 30.0))
         payload = self.build_payload(image_path, openapi)
+        envelope = self.build_envelope(payload, openapi)
         last_error: Optional[Exception] = None
         for attempt in range(self.retry_attempts):
             try:
                 response = self.http.post(
-                    self._url(self.endpoint), json=payload, timeout=timeout
+                    self.execution_url(min(timeout, 30.0)),
+                    json=envelope,
+                    timeout=timeout,
                 )
                 if self._loading_response(response):
                     raise ServiceUnavailableError("Hunyuan ainda está carregando")

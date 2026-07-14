@@ -67,9 +67,11 @@ curl --fail "https://${RUNPOD_POD_ID}-3000.proxy.runpod.net/"
 ## Hunyuan indisponível no health
 
 Uma resposta HTML em `127.0.0.1:8080/` prova apenas que existe um servidor HTTP.
-O Forge3D exige `/gradio_api/openapi.json` com `POST /run/shape_generation`.
-O health registra disponibilidade do OpenAPI, endpoint e código de erro sem
-expor dados sensíveis:
+O Forge3D exige `/gradio_api/openapi.json` com o endpoint lógico
+`POST /run/shape_generation`. O prefixo HTTP vem de `/config`, com
+`/gradio_api` como fallback; a execução normalmente usa
+`POST /gradio_api/run/shape_generation`. O health apenas valida o contrato e não
+executa geração.
 
 ```bash
 curl -s http://127.0.0.1:8000/health | python3 -m json.tool

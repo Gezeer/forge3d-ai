@@ -72,9 +72,9 @@ cd /workspace/forge3d-ai
 PYTHONPATH=backend python3 backend/scripts/inspect_hunyuan_api.py
 ```
 
-O script testa a porta, lê `/gradio_api/openapi.json`, exige
-`POST /run/shape_generation` e mostra nomes, tipos e defaults do JSON publicado.
-O cliente do backend usa esse mesmo documento dinamicamente.
+O script testa a porta, lê `/gradio_api/openapi.json`, exige o endpoint lógico
+`POST /run/shape_generation` e descobre `api_prefix` em `/config`. Ele mostra a
+URL real de execução, normalmente `/gradio_api/run/shape_generation`.
 
 ```bash
 export FORGE3D_HUNYUAN_ENDPOINT=/run/shape_generation
@@ -82,8 +82,9 @@ export FORGE3D_HUNYUAN_RETRY_ATTEMPTS=5
 export FORGE3D_HUNYUAN_RETRY_BASE_SECONDS=0.5
 ```
 
-Não existe configuração posicional nem assinatura JSON. A imagem e os parâmetros
-são enviados por nome no `requestBody` JSON descrito pelo OpenAPI do Gradio 5.
+Não existe assinatura JSON configurável. O cliente monta os valores pelos nomes
+e defaults do OpenAPI e os serializa no envelope Gradio `{"data":[...]}`, usando
+a ordem das propriedades publicada pelo schema.
 
 ### Terminal 3 — iniciar Forge3D na porta 8000
 
@@ -123,7 +124,8 @@ e download. Também confirmam a rota legada TripoSR, GLB e `0/mesh.glb`.
   automaticamente `string`, `FileData` ou `ImageEditor` conforme o schema.
 - **Timeout:** aumente `FORGE3D_GENERATION_TIMEOUT_SECONDS` e
   `FORGE3D_GPU_TEST_TIMEOUT`, verificando antes se o processo ainda usa GPU.
-- **Artefato não encontrado:** confira a saída real de `/run/shape_generation`. São
+- **Artefato não encontrado:** confira a saída real de
+  `/gradio_api/run/shape_generation`. São
   aceitos GLB, OBJ, PLY e STL, como caminho, FileData ou URL HTTP temporária.
 - **Falta de VRAM:** pare processos GPU concorrentes, reduza a concorrência da
   fila e use as configurações suportadas pelo Hunyuan. Não remova pesos/cache.

@@ -38,7 +38,6 @@ def openapi(image_schema=None):
                     "type": "object",
                     "required": ["image"],
                     "properties": {
-                        "caption": {"default": None},
                         "image": image_schema or {"type": "string"},
                         "mv_image_front": {"default": None},
                         "mv_image_back": {"default": None},
@@ -66,6 +65,8 @@ class FakeHttp:
 
     def get(self, url, *, timeout):
         self.calls.append(("GET", url, timeout, None))
+        if not self.gets:
+            return response(404, {"detail": "not found"})
         value = self.gets.pop(0)
         if isinstance(value, Exception):
             raise value
@@ -158,11 +159,24 @@ def test_client_retries_while_gradio_is_loading():
     assert delays == [0.25]
 
 
+def test_health_discovery_never_executes_generation():
+    http = FakeHttp(
+        [response(200, openapi()), response(200, {"api_prefix": "/gradio_api"})]
+    )
+    client = HunyuanClient("http://hunyuan:8080", http_client=http)
+
+    assert client.available(2) is True
+    assert [call[0] for call in http.calls] == ["GET", "GET"]
+    assert client.diagnostics()["execution_url"] == (
+        "http://hunyuan:8080/gradio_api/run/shape_generation"
+    )
+
+
 def test_client_posts_json_to_run_shape_generation(tmp_path: Path):
     image = tmp_path / "robot.png"
     image.write_bytes(b"png")
     http = FakeHttp(
-        [response(200, openapi())],
+        [response(200, openapi()), response(200, {"api_prefix": "/gradio_api"})],
         [response(200, {"value": "/tmp/white_mesh.glb"})],
     )
     client = HunyuanClient("http://hunyuan:8080", http_client=http)
@@ -172,11 +186,46 @@ def test_client_posts_json_to_run_shape_generation(tmp_path: Path):
     method, url, timeout, payload = http.calls[-1]
     assert (method, url, timeout) == (
         "POST",
-        "http://hunyuan:8080/run/shape_generation",
+        "http://hunyuan:8080/gradio_api/run/shape_generation",
         20,
     )
-    assert payload == result.request_payload
-    assert "args" not in payload
+    assert client.endpoint == "/run/shape_generation"
+    assert payload == {
+        "data": [
+            result.request_payload["image"],
+            None,
+            None,
+            None,
+            None,
+            30,
+            5.0,
+            1234,
+            256,
+            True,
+            8000,
+            False,
+        ]
+    }
+    assert len(payload["data"]) == 12
+
+
+def test_client_does_not_duplicate_gradio_api_prefix(tmp_path: Path):
+    image = tmp_path / "robot.png"
+    image.write_bytes(b"png")
+    http = FakeHttp(
+        [response(200, openapi()), response(200, {"api_prefix": "/gradio_api/"})],
+        [response(200, {"value": "/tmp/white_mesh.glb"})],
+    )
+    client = HunyuanClient(
+        "http://hunyuan:8080/gradio_api",
+        endpoint="/run/shape_generation",
+        http_client=http,
+    )
+
+    client.generate(image, 20)
+
+    assert http.calls[-1][1] == ("http://hunyuan:8080/gradio_api/run/shape_generation")
+    assert "/gradio_api/gradio_api/" not in http.calls[-1][1]
 
 
 def test_client_normalizes_relative_gradio_file_url(tmp_path: Path):

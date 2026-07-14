@@ -50,3 +50,17 @@ def test_inspector_redacts_signed_urls_tokens_and_paths():
         }
     )
     assert safe == {"url": "[redacted]", "token": "[redacted]", "path": "[redacted]"}
+
+
+def test_inspector_combines_prefix_and_logical_endpoint_without_duplication():
+    prefix = MODULE.api_prefix({"api_prefix": "/gradio_api/"})
+
+    assert prefix == "/gradio_api"
+    assert (
+        MODULE.execution_url(
+            "http://127.0.0.1:8080/gradio_api",
+            prefix,
+            "/run/shape_generation",
+        )
+        == "http://127.0.0.1:8080/gradio_api/run/shape_generation"
+    )
