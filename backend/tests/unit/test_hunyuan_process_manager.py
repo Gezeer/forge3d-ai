@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import signal
 from pathlib import Path
 from types import SimpleNamespace
@@ -186,9 +187,37 @@ def test_start_uses_exact_command_and_waits_for_openapi(tmp_path: Path):
         str(tmp_path / "cache"),
     ]
     assert options["cwd"] == str(runtime.root)
+    assert options["env"] == os.environ
+    assert options["env"] is not os.environ
     assert options["start_new_session"] is True
     assert runtime.ready_urls[-1].endswith("/gradio_api/openapi.json")
     assert process_manager.operational_state == "running"
+
+
+def test_start_preserves_all_cache_and_runtime_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    runtime = setup_runtime(tmp_path)
+    expected = {
+        "HF_HOME": "/tmp/hf",
+        "HUGGINGFACE_HUB_CACHE": "/tmp/hub",
+        "TRANSFORMERS_CACHE": "/tmp/transformers",
+        "TMPDIR": "/tmp/runtime",
+        "NUMBA_CACHE_DIR": "/tmp/numba",
+        "TORCH_HOME": "/tmp/torch",
+        "XDG_CACHE_HOME": "/tmp/xdg",
+        "MPLCONFIGDIR": "/tmp/matplotlib",
+        "FORGE3D_TEXTURE_CACHE": "/tmp/texture",
+        "FORGE3D_UPLOAD_DIR": "/tmp/uploads",
+        "FORGE3D_OUTPUT_DIR": "/tmp/outputs",
+    }
+    for name, value in expected.items():
+        monkeypatch.setenv(name, value)
+
+    manager(tmp_path, runtime).start_shape_server()
+
+    _, options = runtime.popen_calls[0]
+    assert {name: options["env"][name] for name in expected} == expected
 
 
 def test_start_timeout_is_safe_and_marks_restart_failed(tmp_path: Path):

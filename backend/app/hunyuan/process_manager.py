@@ -15,6 +15,20 @@ import httpx
 
 logger = logging.getLogger("forge3d.hunyuan.process")
 
+RELEVANT_ENVIRONMENT_VARIABLES = (
+    "HF_HOME",
+    "HUGGINGFACE_HUB_CACHE",
+    "TRANSFORMERS_CACHE",
+    "TMPDIR",
+    "NUMBA_CACHE_DIR",
+    "TORCH_HOME",
+    "XDG_CACHE_HOME",
+    "MPLCONFIGDIR",
+    "FORGE3D_TEXTURE_CACHE",
+    "FORGE3D_UPLOAD_DIR",
+    "FORGE3D_OUTPUT_DIR",
+)
+
 
 class HunyuanProcessError(RuntimeError):
     """Safe operational error from the managed Shape process."""
@@ -195,9 +209,11 @@ class HunyuanProcessManager:
         return process.pid
 
     def wait_until_ready(self, timeout: Optional[float] = None) -> None:
+        started = self.monotonic()
         deadline = self.monotonic() + (
             self.start_timeout if timeout is None else timeout
         )
+        last_exception: Optional[Exception] = None
         while self.monotonic() < deadline:
             try:
                 if bool(
@@ -208,17 +224,39 @@ class HunyuanProcessManager:
                 ):
                     self._set_state("running")
                     return
-            except Exception:
-                pass
+            except Exception as error:
+                last_exception = error
             if self._managed_pid is not None and not self._process_exists(
                 self._managed_pid
             ):
                 break
             self.sleeper(0.5)
         self._set_state("restart_failed")
+        process = self._managed_process
+        poll = getattr(process, "poll", None)
+        returncode = poll() if callable(poll) else None
+        duration = self.monotonic() - started
+        logger.error(
+            "hunyuan_shape_health_failed url=%s duration=%.3f returncode=%s "
+            "exception=%r stdout=%s stderr=%s",
+            self.openapi_url,
+            duration,
+            returncode,
+            last_exception,
+            self.log_path,
+            self.log_path,
+            extra={
+                "duration_seconds": round(duration, 3),
+                "returncode": returncode,
+                "exception": repr(last_exception),
+                "stdout_path": str(self.log_path),
+                "stderr_path": str(self.log_path),
+            },
+        )
         raise HunyuanProcessError("Hunyuan Shape não ficou pronto dentro do timeout")
 
     def start_shape_server(self) -> int:
+        started = self.monotonic()
         existing = self.find_shape_process()
         if existing is not None:
             self._managed_pid = existing.pid
@@ -243,14 +281,32 @@ class HunyuanProcessManager:
             "--cache-path",
             str(self.cache_path),
         ]
+        environment = os.environ.copy()
+        relevant_environment = {
+            name: environment.get(name) for name in RELEVANT_ENVIRONMENT_VARIABLES
+        }
         self._set_state("restarting")
         logger.info(
-            "hunyuan_shape_starting port=%s", self.port, extra={"port": self.port}
+            "hunyuan_shape_starting port=%s command=%r environment=%r "
+            "stdout=%s stderr=%s",
+            self.port,
+            command,
+            relevant_environment,
+            self.log_path,
+            self.log_path,
+            extra={
+                "port": self.port,
+                "command": command,
+                "environment": relevant_environment,
+                "stdout_path": str(self.log_path),
+                "stderr_path": str(self.log_path),
+            },
         )
         with self.log_path.open("ab") as log_stream:
             process = self.popen(
                 command,
                 cwd=str(self.root),
+                env=environment,
                 stdout=log_stream,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
@@ -259,7 +315,16 @@ class HunyuanProcessManager:
         self._managed_process = process
         try:
             self.wait_until_ready()
-        except Exception:
+        except Exception as error:
+            poll = getattr(process, "poll", None)
+            returncode = poll() if callable(poll) else None
+            logger.exception(
+                "hunyuan_shape_start_failed pid=%s returncode=%s exception=%r",
+                self._managed_pid,
+                returncode,
+                error,
+                extra={"pid": self._managed_pid, "returncode": returncode},
+            )
             try:
                 if self._process_exists(self._managed_pid):
                     self.signaler(self._managed_pid, signal.SIGTERM)
@@ -267,10 +332,17 @@ class HunyuanProcessManager:
                 pass
             raise
         logger.info(
-            "hunyuan_shape_ready pid=%s port=%s",
+            "hunyuan_shape_ready pid=%s port=%s duration=%.3f returncode=%s",
             self._managed_pid,
             self.port,
-            extra={"pid": self._managed_pid, "port": self.port},
+            self.monotonic() - started,
+            None,
+            extra={
+                "pid": self._managed_pid,
+                "port": self.port,
+                "duration_seconds": round(self.monotonic() - started, 3),
+                "returncode": None,
+            },
         )
         return self._managed_pid
 
