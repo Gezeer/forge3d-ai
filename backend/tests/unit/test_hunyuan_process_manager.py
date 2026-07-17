@@ -5,7 +5,9 @@ import os
 import signal
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
+import app.hunyuan.process_manager as process_manager_module
 import pytest
 from app.hunyuan.process_manager import (
     HunyuanProcessError,
@@ -38,6 +40,8 @@ class Runtime:
         self.next_pid = 9001
         self.returncode = None
         self.hide_processes = False
+        self.spawn_child = False
+        self.port_values = []
 
     def correct(self, pid=123):
         return ProcessInfo(
@@ -51,10 +55,16 @@ class Runtime:
                 "8080",
             ),
             self.root,
+            pgid=pid,
+            sid=pid,
         )
 
     def provider(self):
-        return [] if self.hide_processes else list(self.processes)
+        if self.hide_processes:
+            return []
+        if self.returncode is not None and not self.spawn_child:
+            return [item for item in self.processes if item.pid != self.next_pid]
+        return list(self.processes)
 
     def signaler(self, pid, sent):
         self.signals.append((pid, sent))
@@ -62,13 +72,38 @@ class Runtime:
             self.processes = [item for item in self.processes if item.pid != pid]
 
     def port_probe(self, host, port, timeout):
+        if self.port_values:
+            return self.port_values.pop(0)
         return any(item.pid for item in self.processes)
 
     def popen(self, command, **kwargs):
         self.popen_calls.append((command, kwargs))
-        process = ProcessInfo(self.next_pid, tuple(command), self.root)
-        self.processes.append(process)
+        if self.spawn_child:
+            self.processes.append(
+                ProcessInfo(
+                    self.next_pid + 1,
+                    (str(self.python), "uvicorn-child"),
+                    self.root,
+                    ppid=self.next_pid,
+                    pgid=self.next_pid,
+                    sid=self.next_pid,
+                )
+            )
+        else:
+            self.processes.append(
+                ProcessInfo(
+                    self.next_pid,
+                    tuple(command),
+                    self.root,
+                    pgid=self.next_pid,
+                    sid=self.next_pid,
+                )
+            )
         return SimpleNamespace(pid=self.next_pid, poll=lambda: self.returncode)
+
+    def group_signaler(self, pgid, sent):
+        self.signals.append((pgid, sent))
+        self.processes = [item for item in self.processes if item.pgid != pgid]
 
     def ready_probe(self, url, timeout):
         self.ready_urls.append(url)
@@ -89,6 +124,9 @@ def manager(tmp_path: Path, runtime: Runtime, clock: Clock | None = None):
         log_path=tmp_path / "shape.log",
         process_provider=runtime.provider,
         signaler=runtime.signaler,
+        group_signaler=runtime.group_signaler,
+        getpgid=lambda pid: pid,
+        getsid=lambda pid: pid,
         popen=runtime.popen,
         ready_probe=runtime.ready_probe,
         port_probe=runtime.port_probe,
@@ -236,6 +274,138 @@ def test_start_timeout_is_safe_and_marks_restart_failed(tmp_path: Path):
 
     assert process_manager.operational_state == "restart_failed"
     assert runtime.signals[-1] == (runtime.next_pid, signal.SIGTERM)
+
+
+class Response:
+    def __init__(self, status_code: int, payload: Any = None, text: str = ""):
+        self.status_code = status_code
+        self.payload = payload
+        self.text = text
+
+    def json(self):
+        if self.payload is None:
+            raise ValueError("not json")
+        return self.payload
+
+
+def test_parent_can_exit_while_server_child_in_process_group_becomes_ready(
+    tmp_path: Path,
+):
+    runtime = setup_runtime(tmp_path)
+    runtime.returncode = 0
+    runtime.spawn_child = True
+    runtime.ready_values = [True]
+
+    process_manager = manager(tmp_path, runtime)
+    pid = process_manager.start_shape_server()
+
+    assert pid == runtime.next_pid
+    assert process_manager.operational_state == "running"
+    assert process_manager._process_tree()[0]["pid"] == runtime.next_pid + 1
+
+
+def test_open_port_does_not_count_as_ready_before_http_schema(tmp_path: Path):
+    runtime = setup_runtime(tmp_path)
+    runtime.ready_values = [
+        Response(503, {"detail": "loading"}),
+        Response(503, {"detail": "loading"}),
+        Response(200, {"paths": {"/run/shape_generation": {}}}),
+    ]
+
+    process_manager = manager(tmp_path, runtime)
+    process_manager.start_shape_server()
+
+    assert len(runtime.ready_urls) == 3
+    assert process_manager.operational_state == "running"
+
+
+def test_primary_404_falls_back_to_legacy_openapi(tmp_path: Path):
+    runtime = setup_runtime(tmp_path)
+    runtime.ready_values = [
+        Response(404, text="not found"),
+        Response(200, {"paths": {"/run/shape_generation": {}}}),
+    ]
+
+    manager(tmp_path, runtime).start_shape_server()
+
+    assert runtime.ready_urls[-1].endswith("/openapi.json")
+
+
+def test_html_root_is_not_used_as_readiness(tmp_path: Path):
+    runtime = setup_runtime(tmp_path)
+    runtime.ready_values = [False, True]
+
+    manager(tmp_path, runtime).start_shape_server()
+
+    assert all(not url.endswith(":8080/") for url in runtime.ready_urls)
+
+
+def test_local_http_probe_disables_environment_proxy(monkeypatch: pytest.MonkeyPatch):
+    options = {}
+
+    class Client:
+        def __init__(self, **kwargs):
+            options.update(kwargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def get(self, url, timeout):
+            return Response(200, {"paths": {"/run/shape_generation": {}}})
+
+    monkeypatch.setattr(process_manager_module.httpx, "Client", Client)
+
+    response = HunyuanProcessManager._http_ready("http://127.0.0.1:8080", 1)
+
+    assert response.status_code == 200
+    assert options["trust_env"] is False
+
+
+def test_stop_waits_until_port_is_released_before_returning(tmp_path: Path):
+    runtime = setup_runtime(tmp_path)
+    runtime.processes = [runtime.correct(321)]
+    runtime.port_values = [True, True, False]
+    clock = Clock()
+
+    manager(tmp_path, runtime, clock).stop_shape_server()
+
+    assert clock.value >= 0.4
+
+
+def test_timeout_logs_process_port_tree_output_and_original_exception(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    runtime = setup_runtime(tmp_path)
+    runtime.ready_values = [RuntimeError("connection refused")]
+    process_manager = manager(tmp_path, runtime)
+    process_manager.ready_probe = lambda url, timeout: (_ for _ in ()).throw(
+        RuntimeError("connection refused")
+    )
+    process_manager.log_path.write_text("shape diagnostic", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING, logger="forge3d.hunyuan.process"):
+        with pytest.raises(HunyuanProcessError, match="não ficou pronto") as caught:
+            process_manager.start_shape_server()
+
+    assert isinstance(caught.value.__cause__, RuntimeError)
+    assert "connection refused" in caplog.text
+    assert "shape diagnostic" in caplog.text
+
+
+def test_simulated_stop_paint_restart_cycle_finishes_ready(tmp_path: Path):
+    runtime = setup_runtime(tmp_path)
+    runtime.processes = [runtime.correct(321)]
+    process_manager = manager(tmp_path, runtime)
+
+    process_manager.stop_shape_server()
+    runtime.ready_values = [False, True]
+    pid = process_manager.ensure_shape_running()
+
+    assert pid == runtime.next_pid
+    assert process_manager.operational_state == "running"
 
 
 def test_managed_popen_poll_is_authoritative_when_proc_snapshot_misses_pid(

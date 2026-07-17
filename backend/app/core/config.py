@@ -46,6 +46,7 @@ class Settings:
     auto_engine_fallback: str = "triposr"
     log_level: str = "INFO"
     log_format: str = "text"
+    api_log: Path = Path("/tmp/forge3d-api.log")
     metrics_enabled: bool = True
     health_timeout_seconds: float = 10.0
     texture_root: Path = Path("/workspace/kai3d/models/Hunyuan3D-2.1")
@@ -150,6 +151,7 @@ class Settings:
             auto_engine_fallback=environ.get("FORGE3D_AUTO_ENGINE_FALLBACK", "triposr"),
             log_level=environ.get("FORGE3D_LOG_LEVEL", "INFO").upper(),
             log_format=environ.get("FORGE3D_LOG_FORMAT", "text").lower(),
+            api_log=Path(environ.get("FORGE3D_API_LOG", "/tmp/forge3d-api.log")),
             metrics_enabled=environ.get("FORGE3D_METRICS_ENABLED", "true").lower()
             in {"1", "true", "yes", "on"},
             health_timeout_seconds=float(

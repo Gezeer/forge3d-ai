@@ -33,15 +33,26 @@ def validate_glb(path: Path) -> None:
 
 def wait_shape_ready(client: httpx.Client, timeout: float) -> None:
     deadline = time.monotonic() + timeout
+    last_health = None
+    last_error = None
     while time.monotonic() < deadline:
         try:
-            health = client.get("/health").json()
+            response = client.get("/health")
+            response.raise_for_status()
+            health = response.json()
+            last_health = health
             if health["engines"]["hunyuan"]["status"] == "healthy":
                 return
-        except Exception:
-            pass
+        except Exception as error:
+            last_error = error
         time.sleep(2)
-    raise TimeoutError("Hunyuan Shape não voltou ao estado healthy")
+    details = f"last_health={last_health!r} last_error={last_error!r}"
+    timeout_error = TimeoutError(
+        f"Hunyuan Shape não voltou ao estado healthy; {details}"
+    )
+    if last_error is not None:
+        raise timeout_error from last_error
+    raise timeout_error
 
 
 def main() -> int:

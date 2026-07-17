@@ -37,6 +37,7 @@ def build_container(settings: Settings) -> Container:
         root=settings.hunyuan_root,
         python=settings.hunyuan_python,
         port=settings.hunyuan_port,
+        expected_endpoint=settings.hunyuan_endpoint,
         cache_path=settings.hunyuan_cache_path,
         start_timeout=settings.hunyuan_start_timeout_seconds,
         stop_timeout=settings.hunyuan_stop_timeout_seconds,

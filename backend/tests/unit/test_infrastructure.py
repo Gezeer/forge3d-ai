@@ -23,6 +23,7 @@ def test_settings_keep_runpod_defaults() -> None:
     assert settings.hunyuan_cache_path == Path("/tmp/hunyuan-cache")
     assert settings.gpu_lock_path == Path("/tmp/forge3d-gpu.lock")
     assert settings.health_timeout_seconds == 10
+    assert settings.api_log == Path("/tmp/forge3d-api.log")
     assert settings.texture_cache == Path("/workspace/.cache/forge3d-texture")
     assert "proxy\\.runpod\\.net" in settings.cors_origin_regex
 

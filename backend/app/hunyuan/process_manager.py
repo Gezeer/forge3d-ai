@@ -39,6 +39,9 @@ class ProcessInfo:
     pid: int
     argv: tuple[str, ...]
     cwd: Optional[Path]
+    ppid: Optional[int] = None
+    pgid: Optional[int] = None
+    sid: Optional[int] = None
 
 
 def linux_processes() -> Iterable[ProcessInfo]:
@@ -55,9 +58,26 @@ def linux_processes() -> Iterable[ProcessInfo]:
                 part.decode(errors="replace") for part in raw.split(b"\0") if part
             )
             cwd = (entry / "cwd").resolve()
+            stat_fields = (entry / "stat").read_text().rsplit(") ", 1)[1].split()
             if argv:
-                found.append(ProcessInfo(int(entry.name), argv, cwd))
-        except (FileNotFoundError, PermissionError, ProcessLookupError, OSError):
+                found.append(
+                    ProcessInfo(
+                        int(entry.name),
+                        argv,
+                        cwd,
+                        ppid=int(stat_fields[1]),
+                        pgid=int(stat_fields[2]),
+                        sid=int(stat_fields[3]),
+                    )
+                )
+        except (
+            FileNotFoundError,
+            PermissionError,
+            ProcessLookupError,
+            OSError,
+            IndexError,
+            ValueError,
+        ):
             continue
     return found
 
@@ -69,12 +89,16 @@ class HunyuanProcessManager:
         root: Path,
         python: Path,
         port: int = 8080,
+        expected_endpoint: str = "/run/shape_generation",
         cache_path: Path = Path("/tmp/hunyuan-cache"),
         start_timeout: float = 300.0,
         stop_timeout: float = 30.0,
         log_path: Path = Path("/tmp/hunyuan-shape.log"),
         process_provider: Callable[[], Iterable[ProcessInfo]] = linux_processes,
         signaler: Callable[[int, int], None] = os.kill,
+        group_signaler: Callable[[int, int], None] = os.killpg,
+        getpgid: Callable[[int], int] = os.getpgid,
+        getsid: Callable[[int], int] = os.getsid,
         popen: Callable[..., Any] = subprocess.Popen,
         ready_probe: Optional[Callable[[str, float], Any]] = None,
         port_probe: Optional[Callable[[str, int, float], bool]] = None,
@@ -85,12 +109,20 @@ class HunyuanProcessManager:
         self.python = python.expanduser().absolute()
         self._python_resolved = self.python.resolve()
         self.port = port
+        self.expected_endpoint = (
+            expected_endpoint
+            if expected_endpoint.startswith("/")
+            else f"/{expected_endpoint}"
+        )
         self.cache_path = cache_path.expanduser()
         self.start_timeout = start_timeout
         self.stop_timeout = stop_timeout
         self.log_path = log_path.expanduser()
         self.process_provider = process_provider
         self.signaler = signaler
+        self.group_signaler = group_signaler
+        self.getpgid = getpgid
+        self.getsid = getsid
         self.popen = popen
         self.ready_probe = ready_probe or self._http_ready
         self.port_probe = port_probe or self._port_open
@@ -100,6 +132,8 @@ class HunyuanProcessManager:
         self._state_lock = threading.Lock()
         self._managed_pid: Optional[int] = None
         self._managed_process: Optional[Any] = None
+        self._managed_pgid: Optional[int] = None
+        self._managed_sid: Optional[int] = None
 
     @property
     def operational_state(self) -> str:
@@ -117,17 +151,33 @@ class HunyuanProcessManager:
     @property
     def readiness_urls(self) -> tuple[str, ...]:
         base = f"http://127.0.0.1:{self.port}"
-        # Current Gradio API schema, FastAPI schema used by older Hunyuan
-        # checkouts, then the mounted Gradio UI as a final liveness fallback.
+        # Current Gradio API schema and the FastAPI schema used by older
+        # Hunyuan/Gradio checkouts.  The HTML root is liveness, not readiness.
         return (
             f"{base}/gradio_api/openapi.json",
             f"{base}/openapi.json",
-            f"{base}/",
         )
 
     @staticmethod
     def _http_ready(url: str, timeout: float) -> httpx.Response:
-        return httpx.get(url, timeout=timeout, follow_redirects=True)
+        # Local health probes must never be routed through HTTP(S)_PROXY.
+        with httpx.Client(follow_redirects=True, trust_env=False) as client:
+            return client.get(url, timeout=timeout)
+
+    def _response_is_ready(self, url: str, result: Any) -> bool:
+        status_code = getattr(result, "status_code", None)
+        if status_code is None:
+            return bool(result)
+        if int(status_code) != 200:
+            return False
+        if not url.endswith("openapi.json"):
+            return False
+        try:
+            payload = result.json()
+        except (AttributeError, ValueError):
+            return False
+        paths = payload.get("paths") if isinstance(payload, dict) else None
+        return isinstance(paths, dict) and self.expected_endpoint in paths
 
     @staticmethod
     def _port_open(host: str, port: int, timeout: float) -> bool:
@@ -174,8 +224,40 @@ class HunyuanProcessManager:
                 # Popen.poll() is authoritative for a process we created.  Do not
                 # introduce a race by requiring the same PID to also appear in a
                 # separate /proc snapshot immediately after Popen returned.
-                return poll() is None
+                if poll() is None:
+                    return True
+                return self._managed_group_alive()
         return any(item.pid == pid for item in self.process_provider())
+
+    def _managed_group_alive(self) -> bool:
+        if self._managed_pgid is None:
+            return False
+        return any(
+            item.pgid == self._managed_pgid for item in self.process_provider()
+        )
+
+    def _process_tree(self) -> list[dict[str, Any]]:
+        processes = list(self.process_provider())
+        if self._managed_pgid is not None:
+            processes = [item for item in processes if item.pgid == self._managed_pgid]
+        elif self._managed_pid is not None:
+            processes = [item for item in processes if item.pid == self._managed_pid]
+        return [
+            {
+                "pid": item.pid,
+                "ppid": item.ppid,
+                "pgid": item.pgid,
+                "sid": item.sid,
+                "argv": list(item.argv),
+            }
+            for item in processes
+        ]
+
+    def _signal_managed(self, sent: int) -> None:
+        if self._managed_pgid is not None:
+            self.group_signaler(self._managed_pgid, sent)
+        elif self._managed_pid is not None:
+            self.signaler(self._managed_pid, sent)
 
     def _process_returncode(self) -> Optional[int]:
         poll = getattr(self._managed_process, "poll", None)
@@ -206,6 +288,15 @@ class HunyuanProcessManager:
     def stop_shape_server(self) -> Optional[int]:
         started = self.monotonic()
         process = self.find_shape_process()
+        if process is None and self._managed_group_alive():
+            process = next(
+                (
+                    item
+                    for item in self.process_provider()
+                    if item.pgid == self._managed_pgid
+                ),
+                None,
+            )
         if process is None:
             if self.port_probe("127.0.0.1", self.port, 0.5):
                 raise HunyuanProcessError(
@@ -217,12 +308,21 @@ class HunyuanProcessManager:
         logger.info(
             "hunyuan_shape_stopping pid=%s", process.pid, extra={"pid": process.pid}
         )
-        self.signaler(process.pid, signal.SIGTERM)
+        managed_group = (
+            self._managed_pgid is not None and process.pgid == self._managed_pgid
+        )
+        if managed_group:
+            self._signal_managed(signal.SIGTERM)
+        else:
+            self.signaler(process.pid, signal.SIGTERM)
         try:
             self.wait_until_stopped(process.pid)
         except HunyuanProcessError:
             if self._process_exists(process.pid):
-                self.signaler(process.pid, signal.SIGKILL)
+                if managed_group:
+                    self._signal_managed(signal.SIGKILL)
+                else:
+                    self.signaler(process.pid, signal.SIGKILL)
             self.wait_until_stopped(process.pid, min(5.0, self.stop_timeout))
         duration = self.monotonic() - started
         logger.info(
@@ -231,8 +331,10 @@ class HunyuanProcessManager:
             duration,
             extra={"pid": process.pid, "duration_seconds": round(duration, 3)},
         )
-        if self._managed_pid == process.pid:
-            self._managed_process = None
+        self._managed_process = None
+        self._managed_pid = None
+        self._managed_pgid = None
+        self._managed_sid = None
         return process.pid
 
     def wait_until_ready(self, timeout: Optional[float] = None) -> None:
@@ -243,6 +345,7 @@ class HunyuanProcessManager:
         last_exception: Optional[Exception] = None
         last_url: Optional[str] = None
         last_status: Optional[int] = None
+        attempt = 0
         while self.monotonic() < deadline:
             if self._managed_pid is not None and not self._process_exists(self._managed_pid):
                 returncode = self._process_returncode()
@@ -261,6 +364,7 @@ class HunyuanProcessManager:
                         "returncode": returncode,
                         "duration_seconds": round(duration, 3),
                         "stdout_stderr": output,
+                        "process_tree": self._process_tree(),
                     },
                 )
                 raise HunyuanProcessError(
@@ -271,6 +375,7 @@ class HunyuanProcessManager:
                 if self.monotonic() >= deadline:
                     break
                 last_url = url
+                attempt += 1
                 request_started = self.monotonic()
                 try:
                     result = self.ready_probe(
@@ -279,20 +384,32 @@ class HunyuanProcessManager:
                     )
                     status_code = getattr(result, "status_code", None)
                     last_status = int(status_code) if status_code is not None else None
-                    healthy = last_status == 200 if last_status is not None else bool(result)
+                    healthy = self._response_is_ready(url, result)
                     response_text = getattr(result, "text", "")
+                    process_alive = (
+                        self._managed_pid is None
+                        or self._process_exists(self._managed_pid)
+                    )
+                    port_open = self.port_probe("127.0.0.1", self.port, 0.2)
                     logger.info(
-                        "hunyuan_shape_health_response url=%s status=%s "
-                        "healthy=%s duration=%.3f response=%r",
+                        "hunyuan_shape_health_response attempt=%s url=%s status=%s "
+                        "healthy=%s duration=%.3f process_alive=%s pid=%s pgid=%s "
+                        "port_open=%s response=%r",
+                        attempt,
                         url,
                         last_status,
                         healthy,
                         self.monotonic() - request_started,
+                        process_alive,
+                        self._managed_pid,
+                        self._managed_pgid,
+                        port_open,
                         str(response_text)[:1000],
                         extra={
                             "url": url,
                             "status_code": last_status,
                             "healthy": healthy,
+                            "attempt": attempt,
                             "duration_seconds": round(
                                 self.monotonic() - request_started, 3
                             ),
@@ -300,14 +417,26 @@ class HunyuanProcessManager:
                     )
                     if healthy:
                         self._set_state("running")
+                        logger.info(
+                            "hunyuan_shape_ready pid=%s pgid=%s endpoint=%s "
+                            "duration=%.3f",
+                            self._managed_pid,
+                            self._managed_pgid,
+                            url,
+                            self.monotonic() - started,
+                        )
                         return
                 except Exception as error:
                     last_exception = error
                     logger.warning(
-                        "hunyuan_shape_health_exception url=%s duration=%.3f "
-                        "exception=%r",
+                        "hunyuan_shape_health_exception attempt=%s url=%s "
+                        "duration=%.3f pid=%s pgid=%s port_open=%s exception=%r",
+                        attempt,
                         url,
                         self.monotonic() - request_started,
+                        self._managed_pid,
+                        self._managed_pgid,
+                        self.port_probe("127.0.0.1", self.port, 0.2),
                         error,
                         extra={"url": url, "exception": repr(error)},
                     )
@@ -316,6 +445,11 @@ class HunyuanProcessManager:
         returncode = self._process_returncode()
         duration = self.monotonic() - started
         output = self._log_tail()
+        exception_info = (
+            (type(last_exception), last_exception, last_exception.__traceback__)
+            if last_exception is not None
+            else None
+        )
         logger.error(
             "hunyuan_shape_health_failed url=%s status=%s duration=%.3f "
             "returncode=%s exception=%r stdout_stderr=%r log=%s",
@@ -334,15 +468,23 @@ class HunyuanProcessManager:
                 "exception": repr(last_exception),
                 "stdout_stderr": output,
                 "log_path": str(self.log_path),
+                "process_tree": self._process_tree(),
             },
+            exc_info=exception_info,
         )
-        raise HunyuanProcessError("Hunyuan Shape não ficou pronto dentro do timeout")
+        error = HunyuanProcessError("Hunyuan Shape não ficou pronto dentro do timeout")
+        if last_exception is not None:
+            raise error from last_exception
+        raise error
 
     def start_shape_server(self) -> int:
         started = self.monotonic()
         existing = self.find_shape_process()
         if existing is not None:
             self._managed_pid = existing.pid
+            self._managed_pgid = existing.pgid
+            self._managed_sid = existing.sid
+            self._managed_process = None
             self.wait_until_ready()
             return existing.pid
         if self.port_probe("127.0.0.1", self.port, 0.5):
@@ -398,13 +540,30 @@ class HunyuanProcessManager:
             )
         self._managed_pid = int(process.pid)
         self._managed_process = process
+        try:
+            self._managed_pgid = self.getpgid(self._managed_pid)
+            self._managed_sid = self.getsid(self._managed_pid)
+        except OSError as error:
+            self._managed_pgid = None
+            self._managed_sid = None
+            logger.warning(
+                "hunyuan_shape_identity_unavailable pid=%s exception=%r",
+                self._managed_pid,
+                error,
+            )
         logger.info(
-            "hunyuan_shape_spawned pid=%s command=%r cwd=%s",
+            "hunyuan_shape_spawned pid=%s pgid=%s sid=%s command=%r cwd=%s "
+            "started_at=%.6f",
             self._managed_pid,
+            self._managed_pgid,
+            self._managed_sid,
             command,
             self.root,
+            started,
             extra={
                 "pid": self._managed_pid,
+                "pgid": self._managed_pgid,
+                "sid": self._managed_sid,
                 "command": command,
                 "cwd": str(self.root),
             },
@@ -423,7 +582,7 @@ class HunyuanProcessManager:
             )
             try:
                 if self._process_exists(self._managed_pid):
-                    self.signaler(self._managed_pid, signal.SIGTERM)
+                    self._signal_managed(signal.SIGTERM)
             except OSError:
                 pass
             raise
