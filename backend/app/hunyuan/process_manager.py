@@ -114,10 +114,20 @@ class HunyuanProcessManager:
     def openapi_url(self) -> str:
         return f"http://127.0.0.1:{self.port}/gradio_api/openapi.json"
 
+    @property
+    def readiness_urls(self) -> tuple[str, ...]:
+        base = f"http://127.0.0.1:{self.port}"
+        # Current Gradio API schema, FastAPI schema used by older Hunyuan
+        # checkouts, then the mounted Gradio UI as a final liveness fallback.
+        return (
+            f"{base}/gradio_api/openapi.json",
+            f"{base}/openapi.json",
+            f"{base}/",
+        )
+
     @staticmethod
-    def _http_ready(url: str, timeout: float) -> bool:
-        response = httpx.get(url, timeout=timeout, follow_redirects=True)
-        return response.status_code == 200
+    def _http_ready(url: str, timeout: float) -> httpx.Response:
+        return httpx.get(url, timeout=timeout, follow_redirects=True)
 
     @staticmethod
     def _port_open(host: str, port: int, timeout: float) -> bool:
@@ -160,9 +170,26 @@ class HunyuanProcessManager:
     def _process_exists(self, pid: int) -> bool:
         if self._managed_pid == pid and self._managed_process is not None:
             poll = getattr(self._managed_process, "poll", None)
-            if callable(poll) and poll() is not None:
-                return False
+            if callable(poll):
+                # Popen.poll() is authoritative for a process we created.  Do not
+                # introduce a race by requiring the same PID to also appear in a
+                # separate /proc snapshot immediately after Popen returned.
+                return poll() is None
         return any(item.pid == pid for item in self.process_provider())
+
+    def _process_returncode(self) -> Optional[int]:
+        poll = getattr(self._managed_process, "poll", None)
+        return poll() if callable(poll) else None
+
+    def _log_tail(self, limit: int = 8192) -> str:
+        try:
+            with self.log_path.open("rb") as stream:
+                stream.seek(0, os.SEEK_END)
+                size = stream.tell()
+                stream.seek(max(0, size - limit))
+                return stream.read().decode(errors="replace")
+        except OSError as error:
+            return f"<unable to read process log: {error}>"
 
     def wait_until_stopped(self, pid: int, timeout: Optional[float] = None) -> None:
         deadline = self.monotonic() + (
@@ -214,43 +241,99 @@ class HunyuanProcessManager:
             self.start_timeout if timeout is None else timeout
         )
         last_exception: Optional[Exception] = None
+        last_url: Optional[str] = None
+        last_status: Optional[int] = None
         while self.monotonic() < deadline:
-            try:
-                if bool(
-                    self.ready_probe(
-                        self.openapi_url,
+            if self._managed_pid is not None and not self._process_exists(self._managed_pid):
+                returncode = self._process_returncode()
+                duration = self.monotonic() - started
+                output = self._log_tail()
+                self._set_state("restart_failed")
+                logger.error(
+                    "Shape process exited before becoming healthy pid=%s "
+                    "returncode=%s duration=%.3f stdout_stderr=%r",
+                    self._managed_pid,
+                    returncode,
+                    duration,
+                    output,
+                    extra={
+                        "pid": self._managed_pid,
+                        "returncode": returncode,
+                        "duration_seconds": round(duration, 3),
+                        "stdout_stderr": output,
+                    },
+                )
+                raise HunyuanProcessError(
+                    "Shape process exited before becoming healthy "
+                    f"(returncode={returncode})"
+                )
+            for url in self.readiness_urls:
+                if self.monotonic() >= deadline:
+                    break
+                last_url = url
+                request_started = self.monotonic()
+                try:
+                    result = self.ready_probe(
+                        url,
                         min(5.0, max(0.1, deadline - self.monotonic())),
                     )
-                ):
-                    self._set_state("running")
-                    return
-            except Exception as error:
-                last_exception = error
-            if self._managed_pid is not None and not self._process_exists(
-                self._managed_pid
-            ):
-                break
+                    status_code = getattr(result, "status_code", None)
+                    last_status = int(status_code) if status_code is not None else None
+                    healthy = last_status == 200 if last_status is not None else bool(result)
+                    response_text = getattr(result, "text", "")
+                    logger.info(
+                        "hunyuan_shape_health_response url=%s status=%s "
+                        "healthy=%s duration=%.3f response=%r",
+                        url,
+                        last_status,
+                        healthy,
+                        self.monotonic() - request_started,
+                        str(response_text)[:1000],
+                        extra={
+                            "url": url,
+                            "status_code": last_status,
+                            "healthy": healthy,
+                            "duration_seconds": round(
+                                self.monotonic() - request_started, 3
+                            ),
+                        },
+                    )
+                    if healthy:
+                        self._set_state("running")
+                        return
+                except Exception as error:
+                    last_exception = error
+                    logger.warning(
+                        "hunyuan_shape_health_exception url=%s duration=%.3f "
+                        "exception=%r",
+                        url,
+                        self.monotonic() - request_started,
+                        error,
+                        extra={"url": url, "exception": repr(error)},
+                    )
             self.sleeper(0.5)
         self._set_state("restart_failed")
-        process = self._managed_process
-        poll = getattr(process, "poll", None)
-        returncode = poll() if callable(poll) else None
+        returncode = self._process_returncode()
         duration = self.monotonic() - started
+        output = self._log_tail()
         logger.error(
-            "hunyuan_shape_health_failed url=%s duration=%.3f returncode=%s "
-            "exception=%r stdout=%s stderr=%s",
-            self.openapi_url,
+            "hunyuan_shape_health_failed url=%s status=%s duration=%.3f "
+            "returncode=%s exception=%r stdout_stderr=%r log=%s",
+            last_url,
+            last_status,
             duration,
             returncode,
             last_exception,
-            self.log_path,
+            output,
             self.log_path,
             extra={
+                "url": last_url,
+                "status_code": last_status,
                 "duration_seconds": round(duration, 3),
                 "returncode": returncode,
                 "exception": repr(last_exception),
-                "stdout_path": str(self.log_path),
-                "stderr_path": str(self.log_path),
+                "stdout_stderr": output,
+                "log_path": str(self.log_path),
             },
         )
         raise HunyuanProcessError("Hunyuan Shape não ficou pronto dentro do timeout")
@@ -287,16 +370,18 @@ class HunyuanProcessManager:
         }
         self._set_state("restarting")
         logger.info(
-            "hunyuan_shape_starting port=%s command=%r environment=%r "
+            "hunyuan_shape_starting port=%s command=%r cwd=%s environment=%r "
             "stdout=%s stderr=%s",
             self.port,
             command,
+            self.root,
             relevant_environment,
             self.log_path,
             self.log_path,
             extra={
                 "port": self.port,
                 "command": command,
+                "cwd": str(self.root),
                 "environment": relevant_environment,
                 "stdout_path": str(self.log_path),
                 "stderr_path": str(self.log_path),
@@ -313,6 +398,17 @@ class HunyuanProcessManager:
             )
         self._managed_pid = int(process.pid)
         self._managed_process = process
+        logger.info(
+            "hunyuan_shape_spawned pid=%s command=%r cwd=%s",
+            self._managed_pid,
+            command,
+            self.root,
+            extra={
+                "pid": self._managed_pid,
+                "command": command,
+                "cwd": str(self.root),
+            },
+        )
         try:
             self.wait_until_ready()
         except Exception as error:

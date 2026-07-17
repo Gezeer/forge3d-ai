@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import signal
 from pathlib import Path
@@ -35,6 +36,8 @@ class Runtime:
         self.ready_urls = []
         self.remove_on_term = True
         self.next_pid = 9001
+        self.returncode = None
+        self.hide_processes = False
 
     def correct(self, pid=123):
         return ProcessInfo(
@@ -51,7 +54,7 @@ class Runtime:
         )
 
     def provider(self):
-        return list(self.processes)
+        return [] if self.hide_processes else list(self.processes)
 
     def signaler(self, pid, sent):
         self.signals.append((pid, sent))
@@ -65,7 +68,7 @@ class Runtime:
         self.popen_calls.append((command, kwargs))
         process = ProcessInfo(self.next_pid, tuple(command), self.root)
         self.processes.append(process)
-        return SimpleNamespace(pid=self.next_pid)
+        return SimpleNamespace(pid=self.next_pid, poll=lambda: self.returncode)
 
     def ready_probe(self, url, timeout):
         self.ready_urls.append(url)
@@ -167,7 +170,7 @@ def test_start_does_not_duplicate_existing_shape(tmp_path: Path):
     assert runtime.popen_calls == []
 
 
-def test_start_uses_exact_command_and_waits_for_openapi(tmp_path: Path):
+def test_start_uses_exact_command_and_falls_back_between_readiness_urls(tmp_path: Path):
     runtime = setup_runtime(tmp_path)
     runtime.ready_values = [False, True]
     process_manager = manager(tmp_path, runtime)
@@ -190,7 +193,10 @@ def test_start_uses_exact_command_and_waits_for_openapi(tmp_path: Path):
     assert options["env"] == os.environ
     assert options["env"] is not os.environ
     assert options["start_new_session"] is True
-    assert runtime.ready_urls[-1].endswith("/gradio_api/openapi.json")
+    assert runtime.ready_urls == [
+        "http://127.0.0.1:8080/gradio_api/openapi.json",
+        "http://127.0.0.1:8080/openapi.json",
+    ]
     assert process_manager.operational_state == "running"
 
 
@@ -230,3 +236,36 @@ def test_start_timeout_is_safe_and_marks_restart_failed(tmp_path: Path):
 
     assert process_manager.operational_state == "restart_failed"
     assert runtime.signals[-1] == (runtime.next_pid, signal.SIGTERM)
+
+
+def test_managed_popen_poll_is_authoritative_when_proc_snapshot_misses_pid(
+    tmp_path: Path
+):
+    runtime = setup_runtime(tmp_path)
+    runtime.hide_processes = True
+    runtime.ready_values = [False, False, True]
+
+    process_manager = manager(tmp_path, runtime)
+    pid = process_manager.start_shape_server()
+
+    assert pid == runtime.next_pid
+    assert process_manager.operational_state == "running"
+
+
+def test_process_exit_before_health_is_explicit_and_logs_returncode(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    runtime = setup_runtime(tmp_path)
+    runtime.returncode = 17
+    process_manager = manager(tmp_path, runtime)
+
+    with caplog.at_level(logging.ERROR, logger="forge3d.hunyuan.process"):
+        with pytest.raises(
+            HunyuanProcessError,
+            match=r"Shape process exited before becoming healthy \(returncode=17\)",
+        ):
+            process_manager.start_shape_server()
+
+    assert "Shape process exited before becoming healthy" in caplog.text
+    assert "returncode=17" in caplog.text
+    assert process_manager.operational_state == "restart_failed"
